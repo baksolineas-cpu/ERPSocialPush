@@ -44,10 +44,12 @@ export default function ExternalSignature() {
 
   const captureSelfie = async () => {
     try {
+        setError(null);
         const imageSrc = webcamRef.current?.getScreenshot();
         if (imageSrc) setSelfieBase64(imageSrc);
+        else throw new Error("No se pudo capturar");
     } catch (err) {
-        setError("Error al acceder a la cámara. Por favor asegúrate de haber otorgado los permisos necesarios en los ajustes de tu navegador.");
+        setError("Error al acceder a la cámara. Por favor verifica los permisos en la barra de direcciones del navegador.");
     }
   };
 
@@ -103,16 +105,14 @@ export default function ExternalSignature() {
              <h2 className="text-xl font-black uppercase tracking-tight text-slate-900">Lectura de Contrato</h2>
              <p className="text-xs text-slate-500">Por favor, lee el siguiente contrato antes de proceder con tu validación biométrica y firma.</p>
           </div>
-          <div className="bg-white p-6 rounded-[32px] border border-slate-200 h-96 overflow-y-auto text-xs font-mono text-slate-700 leading-relaxed shadow-inner">
+          <div className="bg-white p-6 rounded-[32px] border border-slate-200 h-96 overflow-hidden shadow-inner">
              {clientData ? (
-               <div className="space-y-4">
-                 <h3 className="font-bold uppercase text-center border-b pb-2">Contrato de Prestación de Servicios</h3>
-                 <p>IDENTIFICACIÓN: {clientData.nombre || '...'}</p>
-                 <p>CURP: {clientData.curp || '...'}</p>
-                 <p>RFC: {clientData.rfc || '...'}</p>
-                 <p className="border-t pt-4">El CLIENTE reconoce y acepta los términos del servicio...</p>
-               </div>
-             ) : <p className="text-center">Cargando contrato...</p>}
+                <iframe 
+                    src={`https://docs.google.com/viewer?url=https://docs.google.com/document/d/12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0/export?format=pdf&embedded=true`} 
+                    className="w-full h-full"
+                    title="Contrato"
+                />
+             ) : <p className="text-center p-10">Cargando contrato...</p>}
           </div>
           <button onClick={() => setStep(1)} className="w-full py-5 bg-emerald-600 text-white rounded-[24px] font-black uppercase text-xs tracking-widest shadow-xl hover:scale-[1.02] transition-all">He leído y acepto el contrato</button>
         </main>

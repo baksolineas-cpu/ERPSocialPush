@@ -447,11 +447,31 @@ export default function EntrevistaHub() {
                    <div className="flex items-center gap-3 border-b border-white/10 pb-4"><Activity size={24} className="text-[#DAA520]" /><h4 className="text-lg font-black uppercase tracking-tighter">Panel de Auditoría</h4></div>
                    <div className="space-y-5">
                       {/* Indicador de Firma */}
-                      <div className={cn("p-3 rounded-xl flex items-center gap-2 mb-4 border", data.estatusfirma === 'FORMALIZADO' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-amber-500/10 border-amber-500/20 text-amber-400")}>
-                        {data.estatusfirma === 'FORMALIZADO' ? <CheckCircle size={16} /> : <Clock size={16} />}
-                        <span className="text-[10px] font-black uppercase tracking-widest leading-none">
-                          {data.estatusfirma === 'FORMALIZADO' ? 'Expediente Formalizado ✅' : 'Esperando Firma ⏳'}
-                        </span>
+                      <div className={cn("p-3 rounded-xl flex items-center justify-between mb-4 border", data.estatusfirma === 'FORMALIZADO' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-amber-500/10 border-amber-500/20 text-amber-400")}>
+                        <div className="flex items-center gap-2">
+                           {data.estatusfirma === 'FORMALIZADO' ? <CheckCircle size={16} /> : <Clock size={16} />}
+                           <span className="text-[10px] font-black uppercase tracking-widest leading-none">
+                             {data.estatusfirma === 'FORMALIZADO' ? 'Expediente Formalizado ✅' : 'Esperando Firma ⏳'}
+                           </span>
+                        </div>
+                        <button onClick={() => {
+                          if (data.id && !data.id.startsWith('NEW_')) {
+                              getGASData('GET_CLIENTE_STATUS', { curp: data.id }).then(res => {
+                                  if (res?.data?.estatusfirma) updateData({ estatusfirma: res.data.estatusfirma });
+                              });
+                          }
+                        }} className="p-1 hover:bg-white/10 rounded-full transition-all">
+                          <RefreshCcw size={12} />
+                        </button>
+                      </div>
+                      
+                      {/* Checklist de Auditoría (Materialidad) */}
+                      <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-2">
+                         <h5 className="text-[9px] font-black uppercase tracking-widest text-white/50 mb-3">Resumen de Materialidad</h5>
+                         <div className="grid grid-cols-2 gap-2 text-[9px] font-bold">
+                            <span className={cn("p-2 rounded-lg flex items-center gap-1", Object.keys(data.expedienteExistingFiles || {}).length > 0 ? "text-emerald-400" : "text-red-400")}>{Object.keys(data.expedienteExistingFiles || {}).length > 0 ? '✅ Docs' : '❌ Docs'}</span>
+                           <span className={cn("p-2 rounded-lg flex items-center gap-1", data.nivelCerteza === 'Alto' ? "text-emerald-400" : "text-amber-400")}>{data.nivelCerteza === 'Alto' ? '✅ Certeza' : '⚠️ Certeza'}</span>
+                         </div>
                       </div>
                       
                       {nivelCerteza === 'Alto' ? (
