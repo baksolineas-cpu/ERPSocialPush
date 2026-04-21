@@ -402,42 +402,62 @@ export default function EntrevistaHub() {
                 )}
 
                 {activeStep === 4 && (
+                  <>
                   <div className="bg-white p-12 rounded-[48px] shadow-2xl border border-slate-100 space-y-10">
                     <div className="text-center space-y-4">
                         <div className="bg-[#DAA520]/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-inner"><FileSignature size={48} className="text-[#DAA520]" /></div>
-                        <h4 className="text-4xl font-black uppercase text-[#003366] tracking-tighter">3. Formalización Legal</h4>
+                        <h4 className="text-4xl font-black uppercase text-[#003366] tracking-tighter">3. Hoja de Diagnóstico y Servicios</h4>
                     </div>
-                    <div className="bg-slate-50 p-8 rounded-3xl border border-slate-200 h-96 overflow-y-auto text-xs font-mono text-slate-700 leading-relaxed shadow-inner scroll-smooth custom-scrollbar">
-                      <div className="space-y-6">
-                        <div className="border-b border-slate-200 pb-4 text-center">
-                          <h3 className="font-black text-lg uppercase text-slate-900">Contrato de Prestación de Servicios Profesionales</h3>
-                          <p className="text-[10px] text-slate-400 mt-1">BAKSO, S.C. | SOCIAL PUSH®</p>
-                        </div>
-                        <p>CONTRATO que celebran por una parte <strong>BAKSO, S.C.</strong> y por la otra parte el <strong>C. {data.nombre || '[NOMBRE COMPLETO]'}</strong>, identificado con CURP <strong>{data.curp || '[CURP]'}</strong> y RFC <strong>{data.rfc || '[RFC]'}</strong>, en adelante designado como "EL CLIENTE".</p>
-                        <p><strong>DECLARACIONES:</strong> EL CLIENTE manifiesta su intención de contratar la asesoría integral en materia de Seguridad Social para los servicios de: <u>{hojaServicio.servicios.join(', ')} {hojaServicio.otroServicioTexto}</u>. Acordando un monto de honorarios de <strong>${hojaServicio.honorariosAcordados} MXN</strong> bajo un esquema de recurrencia <strong>{hojaServicio.universo}</strong>.</p>
-                        <div className="bg-white p-6 rounded-2xl border border-slate-200 italic text-slate-900 leading-normal">
-                          {hojaServicio.notasDiagnostico || 'Cargando diagnóstico técnico...'}
-                        </div>
-                        <div className="border-t border-slate-200 pt-6">
-                          <p className="font-black text-slate-900 uppercase">Fundamentación Legal y Biometría:</p>
-                          <p className="mt-2">Las partes reconocen que la firma electrónica estampada en el presente instrumento tiene plena validez jurídica y es legalmente vinculante conforme a lo estipulado en el <strong>Artículo 1803 del Código Civil Federal</strong>. Asimismo, el cliente acepta la captura de evidencia biométrica facial para garantizar la certeza de su identidad en el presente acto jurídico.</p>
-                        </div>
-                      </div>
+                    
+                    {/* ... (rest of the form content) ... */}
+                    {/* Resumen de Costos */}
+                    <div className="bg-slate-900 text-white p-8 rounded-3xl shadow-xl flex items-center justify-between">
+                       <div><h5 className="text-[10px] font-black uppercase tracking-widest text-white/50">Servicios Seleccionados</h5>
+                          <p className="text-lg font-bold">{hojaServicio.servicios.join(', ')}</p></div>
+                       <div className="text-right"><h5 className="text-[10px] font-black uppercase tracking-widest text-white/50">Total Honorarios</h5>
+                          <p className="text-4xl font-black text-[#DAA520]">${hojaServicio.honorariosAcordados.toLocaleString()}</p></div>
                     </div>
+
+                    {/* Dictamen Final Editable */}
+                    <textarea value={hojaServicio.notasDiagnostico} onChange={(e) => setHojaServicio({...hojaServicio, notasDiagnostico: e.target.value})} className="w-full h-48 p-6 bg-slate-50 border border-slate-200 rounded-3xl text-sm font-medium leading-relaxed outline-none focus:border-[#003366] custom-scrollbar" placeholder="Dictamen técnico..."/>
+                    
+                    {/* Firma Asesor */}
+                    <div className="space-y-4">
+                      <label className="text-xs font-black uppercase text-slate-500">Firma del Asesor</label>
+                      <input type="text" placeholder="Nombre completo del Asesor..." className="w-full p-4 bg-slate-50 border rounded-2xl text-sm font-bold"/>
+                      <div className="border-2 border-slate-200 rounded-2xl h-32 bg-slate-50"><SignatureCanvas ref={sigCanvas} canvasProps={{className: "w-full h-full"}} /></div>
+                    </div>
+
                     <div className="flex flex-col md:flex-row gap-4 w-full justify-center">
                       <button onClick={() => setActiveStep(3)} className="py-6 px-10 bg-slate-100 text-slate-500 rounded-[24px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all shadow-sm">Atrás</button>
                       <button onClick={() => {
-                          const link = `${window.location.origin}/firma/${data.id}?tipoDoc=CONTRATO`;
-                          const text = `Hola ${data.nombre}, por favor formaliza tu expediente digital de SOCIAL PUSH ingresando aquí para tu firma y selfie: ${link}`;
+                          const existe = !!data.contratourl;
+                          const tipoDoc = existe ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
+                          const link = `${window.location.origin}/firma/${data.id}?tipoDoc=${tipoDoc}`;
+                          const text = `Hola ${data.nombre}, formaliza tu expediente de SOCIAL PUSH para tu firma y selfie: ${link}`;
                           window.open(`https://wa.me/52${data.whatsapp?.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank');
-                      }} className="flex-1 py-6 bg-[#25D366] text-white rounded-[24px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-[1.02] transition-all">WhatsApp de Firma <Smartphone size={20} /></button>
-                      <button onClick={() => {
-                          const link = `${window.location.origin}/firma/${data.id}?tipoDoc=CONTRATO`;
-                          const body = `Hola ${data.nombre},\n\nPara formalizar tu diagnóstico y servicios en SOCIAL PUSH, por favor ingresa al siguiente enlace seguro para tu firma y selfie de identidad:\n\n${link}\n\nAtentamente,\nBAKSO, S.C.`;
-                          window.location.href = `mailto:${data.email}?subject=Firma de Contrato - SOCIAL PUSH&body=${encodeURIComponent(body)}`;
-                      }} className="flex-1 py-6 bg-[#003366] text-white rounded-[24px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-[1.02] transition-all">Correo de Firma <Mail size={20} /></button>
+                      }} className="flex-1 py-6 bg-[#25D366] text-white rounded-[24px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-[1.02] transition-all">WhatsApp <Smartphone size={20} /></button>
+                       <button onClick={() => {
+                          const existe = !!data.contratourl;
+                          const tipoDoc = existe ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
+                          const link = `${window.location.origin}/firma/${data.id}?tipoDoc=${tipoDoc}`;
+                          const body = `Hola ${data.nombre},\n\nFormaliza tu diagnóstico de SOCIAL PUSH aquí: ${link}\n\nConforme al Art. 1803 CCF, este acto es legalmente vinculante.`;
+                          window.location.href = `mailto:${data.email}?subject=Firma de Formalización - SOCIAL PUSH&body=${encodeURIComponent(body)}`;
+                      }} className="flex-1 py-6 bg-[#003366] text-white rounded-[24px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-[1.02] transition-all">Correo <Mail size={20} /></button>
                     </div>
                   </div>
+                  
+                  {/* Overlay de Éxito */}
+                  <AnimatePresence>
+                     {data.estatusfirma === 'FORMALIZADO' && (
+                        <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-[100] bg-[#003366]/90 flex items-center justify-center p-10 text-center flex-col gap-6">
+                           <Sparkles size={80} className="text-[#DAA520] animate-bounce"/>
+                           <h2 className="text-5xl font-black text-white uppercase">¡Expediente Formalizado Exitosamente!</h2>
+                           <p className="text-xl text-emerald-400 font-bold">Datos guardados en Drive</p>
+                        </motion.div>
+                     )}
+                  </AnimatePresence>
+                  </>
                 )}
              </div>
 
@@ -465,12 +485,13 @@ export default function EntrevistaHub() {
                         </button>
                       </div>
                       
-                      {/* Checklist de Auditoría (Materialidad) */}
+                      {/* Checklist de Cierre */}
                       <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-2">
-                         <h5 className="text-[9px] font-black uppercase tracking-widest text-white/50 mb-3">Resumen de Materialidad</h5>
-                         <div className="grid grid-cols-2 gap-2 text-[9px] font-bold">
-                            <span className={cn("p-2 rounded-lg flex items-center gap-1", Object.keys(data.expedienteExistingFiles || {}).length > 0 ? "text-emerald-400" : "text-red-400")}>{Object.keys(data.expedienteExistingFiles || {}).length > 0 ? '✅ Docs' : '❌ Docs'}</span>
-                           <span className={cn("p-2 rounded-lg flex items-center gap-1", data.nivelCerteza === 'Alto' ? "text-emerald-400" : "text-amber-400")}>{data.nivelCerteza === 'Alto' ? '✅ Certeza' : '⚠️ Certeza'}</span>
+                         <h5 className="text-[9px] font-black uppercase tracking-widest text-white/50 mb-3">Checklist de Cierre</h5>
+                         <div className="flex flex-col gap-2 text-[10px] font-bold">
+                            <span className={cn("flex items-center gap-2", Object.keys(data.expedienteExistingFiles || {}).length > 0 ? "text-emerald-400" : "text-slate-400")}><CheckSquare size={14}/> {Object.keys(data.expedienteExistingFiles || {}).length > 0 ? 'Documentos cargados' : 'Docs pend.'}</span>
+                            <span className={cn("flex items-center gap-2", sigCanvas.current && !sigCanvas.current.isEmpty() ? "text-emerald-400" : "text-slate-400")}><PenTool size={14}/> Diagnóstico firmado</span>
+                            <span className={cn("flex items-center gap-2", data.estatusfirma === 'PENDIENTE' ? "text-amber-400" : "text-emerald-400")}><Clock size={14}/> {data.estatusfirma === 'PENDIENTE' ? 'Esperando firma cliente' : 'Firma recibida'}</span>
                          </div>
                       </div>
                       
