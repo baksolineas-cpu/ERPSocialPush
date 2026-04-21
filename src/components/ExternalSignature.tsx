@@ -102,19 +102,24 @@ export default function ExternalSignature() {
         <main className="flex-1 max-w-lg mx-auto w-full space-y-6">
           <div className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100 text-center space-y-4">
              <FileText size={48} className="text-[#DAA520] mx-auto" />
-             <h2 className="text-xl font-black uppercase tracking-tight text-slate-900">Lectura de Contrato</h2>
-             <p className="text-xs text-slate-500">Por favor, lee el siguiente contrato antes de proceder con tu validación biométrica y firma.</p>
+             <h2 className="text-xl font-black uppercase tracking-tight text-slate-900">Revisión Final</h2>
+             <p className="text-xs text-slate-500">Por favor, revisa el Contrato y la Hoja de Diagnóstico antes de proceder con tu validación biométrica y firma.</p>
           </div>
           <div className="bg-white p-6 rounded-[32px] border border-slate-200 h-96 overflow-hidden shadow-inner">
              {clientData ? (
-                <iframe 
-                    src={`https://docs.google.com/viewer?url=https://docs.google.com/document/d/12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0/export?format=pdf&embedded=true`} 
-                    className="w-full h-full"
-                    title="Contrato"
-                />
-             ) : <p className="text-center p-10">Cargando contrato...</p>}
+                <div className="w-full h-full space-y-4 overflow-y-auto">
+                    {tipoDoc.includes('CONTRATO') && (
+                        <iframe 
+                            src={`https://docs.google.com/viewer?url=https://docs.google.com/document/d/12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0/export?format=pdf&embedded=true`} 
+                            className="w-full h-64"
+                        />
+                    )}
+                    <h3 className="font-black text-sm uppercase">Hoja de Diagnóstico Personalizada</h3>
+                    <p className="text-xs text-slate-600 italic">{clientData.hojaServicio?.notasDiagnostico || 'Cargando diagnóstico...'}</p>
+                </div>
+             ) : <p className="text-center p-10">Cargando revisión...</p>}
           </div>
-          <button onClick={() => setStep(1)} className="w-full py-5 bg-emerald-600 text-white rounded-[24px] font-black uppercase text-xs tracking-widest shadow-xl hover:scale-[1.02] transition-all">He leído y acepto el contrato</button>
+          <button onClick={() => setStep(1)} className="w-full py-5 bg-emerald-600 text-white rounded-[24px] font-black uppercase text-xs tracking-widest shadow-xl hover:scale-[1.02] transition-all">He leído y acepto</button>
         </main>
       </div>
     );
