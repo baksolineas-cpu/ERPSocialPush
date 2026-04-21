@@ -3,7 +3,7 @@ import {
   Search, User, FileText, CheckCircle, AlertCircle, Clock, Trash2,
   Loader2, RefreshCcw, ShieldCheck, ChevronRight, Smartphone,
   ArrowRight, ExternalLink, MapPin, Scale, FileSearch, CheckCircle2,
-  Activity, AlertTriangle, RotateCcw, Sparkles, PlusCircle, MessageSquare, Send, Briefcase, FileSignature, Mail, QrCode
+  Activity, AlertTriangle, RotateCcw, Sparkles, PlusCircle, MessageSquare, Send, Briefcase, FileSignature, Mail, QrCode, CheckSquare, PenTool
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -92,6 +92,20 @@ export default function EntrevistaHub() {
 
   const sigCanvas = useRef<SignatureCanvas>(null);
   const [firmadoOverlay, setFirmadoOverlay] = useState(false);
+  const [estatusLocal, setEstatusLocal] = useState(data.estatusfirma || 'PENDIENTE');
+
+  useEffect(() => {
+    if (estatusLocal === 'FIRMADO') return;
+    const interval = setInterval(async () => {
+       const res = await callGAS('GET_CLIENTE_STATUS', { curp: data.curp || data.id });
+       if (res?.data?.estatusfirma === 'FIRMADO') {
+         setFirmadoOverlay(true);
+         setEstatusLocal('FIRMADO');
+         clearInterval(interval);
+       }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [data.id, data.curp, estatusLocal]);
 
   const handleFinalizeAudit = async () => {
     setIsProcessing(true);
@@ -420,55 +434,70 @@ export default function EntrevistaHub() {
                 )}
 
                 {activeStep === 4 && (
-                  <>
-                  <div className="bg-white p-12 rounded-[48px] shadow-2xl border border-slate-100 space-y-10">
-                    <div className="text-center space-y-4">
-                        <div className="bg-[#DAA520]/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-inner"><FileSignature size={48} className="text-[#DAA520]" /></div>
-                        <h4 className="text-4xl font-black uppercase text-[#003366] tracking-tighter">3. Hoja de Diagnóstico y Servicios</h4>
-                    </div>
-                    
-                    {/* ... (rest of the form content) ... */}
-                    {/* Resumen de Costos */}
-                    <div className="bg-slate-900 text-white p-8 rounded-3xl shadow-xl flex items-center justify-between">
-                       <div><h5 className="text-[10px] font-black uppercase tracking-widest text-white/50">Servicios Seleccionados</h5>
-                          <p className="text-lg font-bold">{hojaServicio.servicios.join(', ')}</p></div>
-                       <div className="text-right"><h5 className="text-[10px] font-black uppercase tracking-widest text-white/50">Total Honorarios</h5>
-                          <p className="text-4xl font-black text-[#DAA520]">${hojaServicio.honorariosAcordados.toLocaleString()}</p></div>
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div className="lg:col-span-2 bg-white p-12 rounded-[48px] shadow-2xl border border-slate-100 space-y-10">
+                      <div className="text-center space-y-4">
+                          <div className="bg-[#DAA520]/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-inner"><FileSignature size={48} className="text-[#DAA520]" /></div>
+                          <h4 className="text-4xl font-black uppercase text-[#003366] tracking-tighter">3. Hoja de Diagnóstico y Servicios</h4>
+                      </div>
+                      
+                      {/* Resumen de Costos */}
+                      <div className="bg-slate-900 text-white p-8 rounded-3xl shadow-xl flex items-center justify-between">
+                         <div><h5 className="text-[10px] font-black uppercase tracking-widest text-white/50">Servicios Seleccionados</h5>
+                            <p className="text-lg font-bold">{hojaServicio.servicios.join(', ')}</p></div>
+                         <div className="text-right"><h5 className="text-[10px] font-black uppercase tracking-widest text-white/50">Total Honorarios</h5>
+                            <p className="text-4xl font-black text-[#DAA520]">${hojaServicio.honorariosAcordados.toLocaleString()}</p></div>
+                      </div>
+
+                      {/* Dictamen Final Editable */}
+                      <div>
+                        <label className="text-xs font-black uppercase text-slate-500 mb-2 block">HOJA DE DIAGNÓSTICO TÉCNICO</label>
+                        <textarea value={hojaServicio.notasDiagnostico} onChange={(e) => setHojaServicio({...hojaServicio, notasDiagnostico: e.target.value})} className="w-full h-48 p-6 bg-slate-50 border border-slate-200 rounded-3xl text-sm font-medium leading-relaxed outline-none focus:border-[#003366]" placeholder="Dictamen técnico..."/>
+                      </div>
+                      
+                      {/* Firma Asesor */}
+                      <div className="space-y-4 border-t pt-8">
+                        <label className="text-xs font-black uppercase text-slate-500">Firma del Asesor (Obligatoria)</label>
+                        <input type="text" value={asesorNombre} onChange={(e) => setAsesorNombre(e.target.value)} placeholder="Nombre completo del Asesor..." className="w-full p-4 bg-slate-50 border rounded-2xl text-sm font-bold"/>
+                        <div className="border-2 border-slate-200 rounded-2xl h-32 bg-slate-50 relative"><SignatureCanvas ref={sigCanvas} canvasProps={{className: "w-full h-full"}} />
+                           <button onClick={() => sigCanvas.current?.clear()} className="absolute top-2 right-2 text-[9px] font-black uppercase p-1">Limpiar</button>
+                        </div>
+                      </div>
+                      <button onClick={handleFinalizeAudit} className="w-full py-6 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase tracking-widest hover:bg-[#c9961d] transition-all shadow-xl">Finalizar Auditoría</button>
                     </div>
 
-                    {/* Dictamen Final Editable */}
-                    <textarea value={hojaServicio.notasDiagnostico} onChange={(e) => setHojaServicio({...hojaServicio, notasDiagnostico: e.target.value})} className="w-full h-48 p-6 bg-slate-50 border border-slate-200 rounded-3xl text-sm font-medium leading-relaxed outline-none focus:border-[#003366] custom-scrollbar" placeholder="Dictamen técnico..."/>
-                    
-                    {/* Firma Asesor */}
-                    <div className="space-y-4">
-                      <label className="text-xs font-black uppercase text-slate-500">Firma del Asesor</label>
-                      <input type="text" value={asesorNombre} onChange={(e) => setAsesorNombre(e.target.value)} placeholder="Nombre completo del Asesor..." className="w-full p-4 bg-slate-50 border rounded-2xl text-sm font-bold"/>
-                      <div className="border-2 border-slate-200 rounded-2xl h-32 bg-slate-50 relative"><SignatureCanvas ref={sigCanvas} canvasProps={{className: "w-full h-full"}} />
-                         <button onClick={() => sigCanvas.current?.clear()} className="absolute top-2 right-2 text-[9px] font-black uppercase p-1">Limpiar</button>
+                    {/* Monitor de Cierre */}
+                    <div className="space-y-6">
+                      <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                        <h5 className="text-xs font-black uppercase text-[#003366] tracking-widest mb-6">Monitor de Cierre</h5>
+                        <div className="space-y-4">
+                           <div className="flex items-center gap-3 text-emerald-600"><CheckSquare size={20} /> <span className="font-bold text-sm">Documentos OK</span></div>
+                           <div className="flex items-center gap-3 text-emerald-600"><CheckSquare size={20} /> <span className="font-bold text-sm">Diagnóstico firmado por Asesor</span></div>
+                           <div className={cn("flex items-center gap-3", estatusLocal === 'FIRMADO' ? "text-emerald-600" : "text-amber-500")}>
+                             {estatusLocal === 'FIRMADO' ? <CheckSquare size={20} /> : <PenTool size={20} />} 
+                             <span className="font-bold text-sm">Firma de Cliente {estatusLocal === 'FIRMADO' ? 'Recibida' : 'Pendiente'}</span>
+                           </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-4">
+                        <button onClick={() => {
+                            const existe = !!data.contratourl;
+                            const tipoDoc = existe ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
+                            const link = `${window.location.origin}/firma/${data.id}?tipoDoc=${tipoDoc}`;
+                            const text = `Hola ${data.nombre}, formaliza tu expediente de SOCIAL PUSH: ${link}. Conforme Art. 1803 CCF.`;
+                            window.open(`https://wa.me/52${data.whatsapp?.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank');
+                        }} className="py-5 bg-[#25D366] text-white rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-3 shadow-lg hover:scale-105 transition-all">WhatsApp <Smartphone size={16} /></button>
+                         <button onClick={() => {
+                            const existe = !!data.contratourl;
+                            const tipoDoc = existe ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
+                            const link = `${window.location.origin}/firma/${data.id}?tipoDoc=${tipoDoc}`;
+                            const body = `Hola ${data.nombre},\n\nFormaliza tu diagnóstico de SOCIAL PUSH aquí: ${link}\n\nConforme Art. 1803 CCF, es vinculante.`;
+                            window.location.href = `mailto:${data.email}?subject=Formalización - SOCIAL PUSH&body=${encodeURIComponent(body)}`;
+                        }} className="py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-3 shadow-lg hover:scale-105 transition-all">Correo <Mail size={16} /></button>
                       </div>
                     </div>
-
-                    <div className="flex flex-col md:flex-row gap-4 w-full justify-center">
-                      <button onClick={() => setActiveStep(3)} className="py-6 px-10 bg-slate-100 text-slate-500 rounded-[24px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all shadow-sm">Atrás</button>
-                      <button onClick={handleFinalizeAudit} className="py-6 px-10 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase tracking-widest hover:bg-[#c9961d] transition-all shadow-xl">Finalizar Auditoría</button>
-                      <button onClick={() => {
-                          const existe = !!data.contratourl;
-                          const tipoDoc = existe ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
-                          const link = `${window.location.origin}/firma/${data.id}?tipoDoc=${tipoDoc}`;
-                          const text = `Hola ${data.nombre}, formaliza tu expediente de SOCIAL PUSH para tu firma y selfie: ${link}. Conforme al Art. 1803 CCF.`;
-                          window.open(`https://wa.me/52${data.whatsapp?.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank');
-                      }} className="flex-1 py-6 bg-[#25D366] text-white rounded-[24px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-[1.02] transition-all">WhatsApp <Smartphone size={20} /></button>
-                       <button onClick={() => {
-                          const existe = !!data.contratourl;
-                          const tipoDoc = existe ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
-                          const link = `${window.location.origin}/firma/${data.id}?tipoDoc=${tipoDoc}`;
-                          const body = `Hola ${data.nombre},\n\nFormaliza tu diagnóstico de SOCIAL PUSH aquí: ${link}\n\nConforme al Art. 1803 CCF, este acto es legalmente vinculante.`;
-                          window.location.href = `mailto:${data.email}?subject=Firma de Formalización - SOCIAL PUSH&body=${encodeURIComponent(body)}`;
-                      }} className="flex-1 py-6 bg-[#003366] text-white rounded-[24px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-[1.02] transition-all">Correo <Mail size={20} /></button>
-                    </div>
                   </div>
-                  
-                  {/* Overlay de Éxito */}
+                )}
                   <AnimatePresence>
                      {data.estatusfirma === 'FORMALIZADO' && (
                         <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-[100] bg-[#003366]/90 flex items-center justify-center p-10 text-center flex-col gap-6">

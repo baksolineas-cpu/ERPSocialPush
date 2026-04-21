@@ -172,10 +172,32 @@ export default function ExternalSignature() {
 
       <main className="flex-1 max-w-lg mx-auto w-full p-6 space-y-8">
         <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 space-y-6">
-          <div className="text-center space-y-1">
-            <h3 className="text-xl font-black text-slate-900 uppercase">Firma de Documento</h3>
-            <p className="text-xs text-slate-500 font-medium">Estás firmando: <span className="text-emerald-600 font-bold">{tipoDoc}</span></p>
+          <div className="text-center space-y-4">
+             <div className="bg-[#DAA520]/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-inner"><FileText size={48} className="text-[#DAA520]" /></div>
+             <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Revisión de Formalización</h3>
+             
+             {/* Client Data Summary */}
+             <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 text-left space-y-2">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Información del Cliente</p>
+                <p className="text-sm font-bold text-[#003366]">{clientData.nombre}</p>
+                <p className="text-xs text-slate-600">CURP: {clientData.curp} | RFC: {clientData.rfc}</p>
+                <div className="pt-2 border-t border-slate-200">
+                    <p className="text-[10px] uppercase font-bold text-slate-500">Servicios: {clientData.hojaServicio?.servicios.join(', ')}</p>
+                </div>
+             </div>
           </div>
+
+          {/* Drive Content Loader */}
+          {tipoDoc.includes('CONTRATO') && (
+            <div className="bg-white p-6 rounded-[32px] border border-slate-200 h-96 overflow-hidden shadow-inner">
+               <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Contrato Marco</label>
+               <iframe 
+                   src={`https://docs.google.com/viewer?url=https://docs.google.com/document/d/12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0/export?format=pdf&embedded=true`} 
+                   className="w-full h-full"
+                   title="Contrato"
+               />
+            </div>
+          )}
 
           {/* Selfie Section */}
           {!skipSelfieParam && (
