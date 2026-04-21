@@ -1,0 +1,6 @@
+{
+  "name": "Entrevista HUB - BAKSO",
+  "description": "Hub de entrevista con lógica actuarial y legal mexicana. Validación de CURP/NSS, cálculo de edad de pensión, OCR con Gemini AI y biometría.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}
