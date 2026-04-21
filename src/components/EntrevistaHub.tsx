@@ -88,6 +88,24 @@ export default function EntrevistaHub() {
   const [iaContext, setIaContext] = useState('');
   const [isAiDrafting, setIsAiDrafting] = useState(false);
   const [pendingUploads, setPendingUploads] = useState<{ [key: string]: string }>({});
+  const [asesorNombre, setAsesorNombre] = useState('');
+
+  const sigCanvas = useRef<SignatureCanvas>(null);
+  const [firmadoOverlay, setFirmadoOverlay] = useState(false);
+
+  const handleFinalizeAudit = async () => {
+    setIsProcessing(true);
+    const signatureBase64 = sigCanvas.current?.getTrimmedCanvas().toDataURL('image/png');
+    const res = await callGAS('FINALIZE_AUDIT', {
+        clienteId: data.id,
+        asesorNombre,
+        signatureBase64,
+        notasDiagnostico: hojaServicio.notasDiagnostico,
+        data
+    });
+    if (res?.success) alert("Auditoría finalizada y PDF generado");
+    setIsProcessing(false);
+  };
 
   const updateData = (newData: Partial<Cliente>) => {
     setData(prev => ({ ...prev, ...newData }));
@@ -424,17 +442,20 @@ export default function EntrevistaHub() {
                     {/* Firma Asesor */}
                     <div className="space-y-4">
                       <label className="text-xs font-black uppercase text-slate-500">Firma del Asesor</label>
-                      <input type="text" placeholder="Nombre completo del Asesor..." className="w-full p-4 bg-slate-50 border rounded-2xl text-sm font-bold"/>
-                      <div className="border-2 border-slate-200 rounded-2xl h-32 bg-slate-50"><SignatureCanvas ref={sigCanvas} canvasProps={{className: "w-full h-full"}} /></div>
+                      <input type="text" value={asesorNombre} onChange={(e) => setAsesorNombre(e.target.value)} placeholder="Nombre completo del Asesor..." className="w-full p-4 bg-slate-50 border rounded-2xl text-sm font-bold"/>
+                      <div className="border-2 border-slate-200 rounded-2xl h-32 bg-slate-50 relative"><SignatureCanvas ref={sigCanvas} canvasProps={{className: "w-full h-full"}} />
+                         <button onClick={() => sigCanvas.current?.clear()} className="absolute top-2 right-2 text-[9px] font-black uppercase p-1">Limpiar</button>
+                      </div>
                     </div>
 
                     <div className="flex flex-col md:flex-row gap-4 w-full justify-center">
                       <button onClick={() => setActiveStep(3)} className="py-6 px-10 bg-slate-100 text-slate-500 rounded-[24px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all shadow-sm">Atrás</button>
+                      <button onClick={handleFinalizeAudit} className="py-6 px-10 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase tracking-widest hover:bg-[#c9961d] transition-all shadow-xl">Finalizar Auditoría</button>
                       <button onClick={() => {
                           const existe = !!data.contratourl;
                           const tipoDoc = existe ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
                           const link = `${window.location.origin}/firma/${data.id}?tipoDoc=${tipoDoc}`;
-                          const text = `Hola ${data.nombre}, formaliza tu expediente de SOCIAL PUSH para tu firma y selfie: ${link}`;
+                          const text = `Hola ${data.nombre}, formaliza tu expediente de SOCIAL PUSH para tu firma y selfie: ${link}. Conforme al Art. 1803 CCF.`;
                           window.open(`https://wa.me/52${data.whatsapp?.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank');
                       }} className="flex-1 py-6 bg-[#25D366] text-white rounded-[24px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-[1.02] transition-all">WhatsApp <Smartphone size={20} /></button>
                        <button onClick={() => {

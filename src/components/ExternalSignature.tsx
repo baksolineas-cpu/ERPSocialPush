@@ -49,7 +49,7 @@ export default function ExternalSignature() {
         if (imageSrc) setSelfieBase64(imageSrc);
         else throw new Error("No se pudo capturar");
     } catch (err) {
-        setError("Error al acceder a la cámara. Por favor verifica los permisos en la barra de direcciones del navegador.");
+        setError("Error al acceder a la cámara. Revisa permisos.");
     }
   };
 
