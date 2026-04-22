@@ -442,6 +442,7 @@ export default function EntrevistaHub() {
     if (hojaServicio.otroServicioTexto) serviciosFinales.push(hojaServicio.otroServicioTexto);
 
     try {
+      console.log("DATA_DEBUG", "Payload enviado a FINALIZE_AUDIT:", data);
       const res = await callGAS('FINALIZE_AUDIT', {
         ...data,
         asesor: asesorNombre,

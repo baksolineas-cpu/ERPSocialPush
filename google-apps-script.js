@@ -180,6 +180,7 @@ function handleUpdateSignature(payload) {
  * y registra la hoja de servicio.
  */
 function handleFinalizeAudit(payload) {
+  logDebug("DEBUG_ENTRADA", "Payload recibido: " + JSON.stringify(payload));
   // Aseguramos que el id esté presente para handleCreateCliente
   const searchId = payload.id || payload.clienteId;
   if (!payload.id) payload.id = searchId;
@@ -194,8 +195,13 @@ function handleFinalizeAudit(payload) {
   try {
     const templateId = "12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0";
     const folderId = payload.id_carpeta_drive || payload.idcarpetadrive;
+    
+    logDebug("FINALIZE_AUDIT", "Iniciando contrato. folderId: " + folderId + ", templateId: " + templateId);
+    
     if (folderId && templateId) {
        const folder = DriveApp.getFolderById(folderId);
+       logDebug("FINALIZE_AUDIT", "Folder accesible: " + folder.getName());
+       
        // Eliminar contratos previos si existen para no duplicar
        const oldFiles = folder.getFiles();
        while(oldFiles.hasNext()) {
@@ -448,6 +454,16 @@ function handleCreateCliente(payload) {
     sheet.appendRow(rowData);
   }
 
+  // INTENTAR GENERACIÓN AUTOMÁTICA DE CONTRATO SI TENEMOS DATOS MÍNIMOS
+  if (payload.nombre && payload.curp) {
+     logDebug("AUTO_CONTRATO", "Iniciando generación para: " + payload.curp);
+     try {
+       handleFinalizeAudit({...payload, id_carpeta_drive: folderId});
+     } catch(e) {
+       logDebug("AUTO_CONTRATO_ERR", e.toString());
+     }
+  }
+
   return createResponse({ success: true, id: curp10, id_carpeta_drive: folderId });
 }
 
@@ -482,11 +498,16 @@ function handleCreateHoja(payload) {
 
 function handleUploadFile(payload) {
   try {
+    logDebug("UPLOAD_FILE", "Intentando subir a: " + payload.id_carpeta_drive + ", Archivo: " + payload.fileName);
     const folder = DriveApp.getFolderById(payload.id_carpeta_drive);
     const blob = Utilities.newBlob(Utilities.base64Decode(payload.fileData), 'application/pdf', payload.fileName);
     const file = folder.createFile(blob);
+    logDebug("UPLOAD_FILE", "Éxito URL: " + file.getUrl());
     return createResponse({ success: true, url: file.getUrl() });
-  } catch (e) { return createResponse({ success: false, error: e.toString() }); }
+  } catch (e) {
+    logDebug("UPLOAD_FILE_ERR", e.toString());
+    return createResponse({ success: false, error: e.toString() }); 
+  }
 }
 
 function handleDeleteFile(payload) {

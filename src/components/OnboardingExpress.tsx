@@ -496,7 +496,7 @@ export default function OnboardingExpress() {
                   </div>
                 </div>
                 <a 
-                  href="https://drive.google.com/file/d/1TUH11HsD2sAyDMlI4JryYhOO9059KTq0/view?usp=drive_link" 
+                  href="https://drive.google.com/file/d/1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk/view?usp=drive_link" 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="bg-white px-4 py-2 rounded-lg text-xs font-bold text-blue-600 border border-blue-100 hover:bg-blue-50 transition-colors"
