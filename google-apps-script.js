@@ -7,7 +7,6 @@ function doPost(e) {
   
   try {
     const data = JSON.parse(e.postData.contents);
-    // Soporta tanto si la acción viene en la raíz como si viene dentro del payload
     const action = data.action || (data.payload && data.payload.action);
     const payload = data.payload || data; 
     
@@ -27,6 +26,10 @@ function doPost(e) {
       return handleLogin(payload.email || payload);
     } else if (action === 'LOG_ACTION') {
       return handleLogAction(payload, data.userEmail);
+    } else if (action === 'FINALIZE_AUDIT') {
+      return handleFinalizeAudit(payload);
+    } else if (action === 'UPDATE_CLIENTE_SIGNATURE') {
+      return handleUpdateSignature(payload);
     } else {
       return createResponse({ error: 'Acción no válida: ' + action }, 400);
     }
@@ -36,16 +39,87 @@ function doPost(e) {
   }
 }
 
+/**
+ * Registra la firma y selfie del cliente, y cambia el estatus a FIRMADO.
+ */
+function handleUpdateSignature(payload) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName("CLIENTES");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0].map(h => h.toString().toLowerCase().trim());
+  const idCol = headers.indexOf("id");
+  const curpCol = headers.indexOf("curp");
+  const estatusCol = headers.indexOf("estatusfirma");
+
+  const searchId = payload.clienteId.toString().toUpperCase();
+  let rowIndex = -1;
+
+  for (let i = 1; i < data.length; i++) {
+    const rowId = data[i][idCol] ? data[i][idCol].toString().toUpperCase() : "";
+    const rowCurp = data[i][curpCol] ? data[i][curpCol].toString().toUpperCase() : "";
+    if (rowId === searchId || rowCurp === searchId) {
+      rowIndex = i;
+      break;
+    }
+  }
+
+  if (rowIndex === -1) return createResponse({ success: false, error: "Cliente no encontrado" }, 404);
+
+  // 1. Guardar archivos en Drive
+  const cliente = getSheetData("CLIENTES")[rowIndex - 1]; // getSheetData devuelve objetos sin header
+  const folderId = cliente.id_carpeta_drive || cliente.idcarpetadrive;
+  
+  if (folderId) {
+    const folder = DriveApp.getFolderById(folderId);
+    if (payload.selfieBase64 && payload.selfieBase64.length > 50) {
+      const selfieBlob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg", `SELFIE_${searchId}.jpg`);
+      folder.createFile(selfieBlob);
+    }
+    if (payload.firmaBase64 && payload.firmaBase64.length > 50) {
+      const firmaBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png", `FIRMA_CLIENTE_${searchId}.png`);
+      folder.createFile(firmaBlob);
+    }
+  }
+
+  // 2. Actualizar estatus en Excel
+  sheet.getRange(rowIndex + 1, estatusCol + 1).setValue("FIRMADO");
+  
+  return createResponse({ success: true });
+}
+
+/**
+ * Procesa la certificación final del asesor, actualiza el cliente
+ * y registra la hoja de servicio.
+ */
+function handleFinalizeAudit(payload) {
+  // Aseguramos que el id esté presente para handleCreateCliente
+  const searchId = payload.id || payload.clienteId;
+  if (!payload.id) payload.id = searchId;
+
+  // 1. Actualizamos el registro del cliente (incluyendo estatusfirma si se envió)
+  const res = handleCreateCliente(payload);
+  
+  // 2. Registramos formalmente la hoja de servicio/diagnóstico
+  handleCreateHoja(payload);
+  
+  return res;
+}
+
 function doGet(e) {
   const action = e.parameter.action;
   if (action === 'LOGIN') {
     return handleLogin(e.parameter.email);
   }
   if (action === 'GET_CLIENTE_STATUS') {
-    const curp = e.parameter.curp;
-    if (!curp) return createResponse({ status: 'error' }, 400);
+    const identifier = e.parameter.curp || e.parameter.id;
+    if (!identifier) return createResponse({ status: 'error' }, 400);
+    
     const clientes = getSheetData("CLIENTES");
-    const cliente = clientes.find(c => c.curp && c.curp.toString().toUpperCase() === curp.toUpperCase());
+    // CORRECCIÓN CRÍTICA: Busca tanto en la columna ID (A) como en la columna CURP (D)
+    const cliente = clientes.find(c => 
+      (c.id && c.id.toString().toUpperCase() === identifier.toUpperCase()) || 
+      (c.curp && c.curp.toString().toUpperCase() === identifier.toUpperCase())
+    );
     
     if (cliente) {
       const folderId = cliente.id_carpeta_drive || cliente.idcarpetadrive;
@@ -69,6 +143,18 @@ function doGet(e) {
           }
         } catch(err) { cliente.drive_verificado = false; }
       }
+      // CORRECCIÓN CRÍTICIA: Buscar Diagnóstico (Hoja de Servicio) para el portal de firma
+      const hojas = getSheetData("HOJAS_SERVICIO");
+      const miHoja = hojas.reverse().find(h => 
+        (h.idcliente && h.idcliente.toString().toUpperCase() === identifier.toUpperCase()) ||
+        (h.clienteid && h.clienteid.toString().toUpperCase() === identifier.toUpperCase())
+      );
+      if (miHoja) {
+        cliente.hojaservicio = miHoja;
+        // Mapeo específico para compatibilidad con el frontend
+        cliente.diagnosticoTexto = miHoja.diagnostico || miHoja.notasdiagnostico || "";
+      }
+
       return createResponse({ status: 'success', data: cliente });
     }
     return createResponse({ status: 'error' }, 404);
@@ -78,64 +164,83 @@ function doGet(e) {
 }
 
 function handleCreateCliente(payload) {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("CLIENTES");
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName("CLIENTES");
   const values = sheet.getDataRange().getValues();
   const headers = values[0].map(h => h.toString().toLowerCase().trim());
+  
   const curpCol = headers.indexOf("curp");
+  const idCol = headers.indexOf("id");
   
+  // 1. BLINDAJE DE BÚSQUEDA: Busca por CURP o por ID
   let existingRowIndex = -1;
-  if (payload.curp) {
-    existingRowIndex = values.findIndex(row => row[curpCol] === payload.curp);
+  const searchId = (payload.id || payload.curp || "").toString().toUpperCase();
+  
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const rowId = row[idCol] ? row[idCol].toString().toUpperCase() : "";
+    const rowCurp = row[curpCol] ? row[curpCol].toString().toUpperCase() : "";
+    
+    if ((payload.curp && rowCurp === payload.curp.toString().toUpperCase()) || 
+        (searchId && rowId === searchId)) {
+      existingRowIndex = i;
+      break;
+    }
   }
 
-  // BLINDAJE DE IDENTIDAD: Extrae los primeros 10 dígitos de la CURP obligatoriamente
-  const curp10 = payload.curp ? payload.curp.toString().substring(0, 10).toUpperCase() : payload.id;
+  const curp10 = payload.curp ? payload.curp.toString().substring(0, 10).toUpperCase() : (payload.id || "");
 
-  let folder;
-  if (existingRowIndex > -1 && payload.id_carpeta_drive) {
-    try { folder = DriveApp.getFolderById(payload.id_carpeta_drive); } 
-    catch(e) { folder = DriveApp.getFolderById(ROOT_FOLDER_ID).createFolder(`[${curp10}] ${payload.nombre}`); }
+  // 2. RECUPERAR DATOS PREVIOS PARA NO SOBREESCRIBIR CON VACÍOS (MERGE)
+  let rowData = [];
+  if (existingRowIndex > -1) {
+    rowData = [...values[existingRowIndex]];
   } else {
-    folder = DriveApp.getFolderById(ROOT_FOLDER_ID).createFolder(`[${curp10}] ${payload.nombre}`);
+    // Fila por defecto con 22 columnas
+    rowData = new Array(22).fill("");
+  }
+
+  // 3. ACTUALIZACIÓN SELECTIVA (Solo si el payload trae el dato)
+  const mapUpdate = (index, value) => { if (value !== undefined && value !== null) rowData[index] = value; };
+
+  mapUpdate(0, curp10);                                       // A: id
+  mapUpdate(1, payload.nombre);                              // B: Nombre
+  mapUpdate(2, payload.apellidos);                           // C: Apellidos
+  mapUpdate(3, payload.curp);                                // D: CURP
+  
+  if (payload.nssList && Array.isArray(payload.nssList)) {
+    mapUpdate(4, payload.nssList.join(", "));                // E: # NSS
+  } else if (payload.nss) {
+    mapUpdate(4, payload.nss);
   }
   
-  const folderId = folder.getId();
-
-  // Compartir Lector
-  if (payload.email && payload.email.indexOf('@') > -1) {
-    try { folder.addViewer(payload.email); } catch(e) {}
+  mapUpdate(5, payload.rfc);                                 // F: RFC
+  mapUpdate(6, payload.whatsapp);                            // G: WhatsApp
+  mapUpdate(7, payload.email);                               // H: Email
+  mapUpdate(8, payload.selfie_url);                          // I: SelfieURL
+  mapUpdate(9, payload.comprobantedomiciliourl);             // J: ComprobanteDomicilioUrl
+  mapUpdate(10, payload.domicilioExtraido);                  // K: DomicilioExtraido
+  
+  // Carpeta Drive
+  let folderId = rowData[11] || payload.id_carpeta_drive;
+  if (!folderId) {
+     const folder = DriveApp.getFolderById(ROOT_FOLDER_ID).createFolder(`[${curp10}] ${payload.nombre || "NUEVO"}`);
+     folderId = folder.getId();
+     if (payload.email && payload.email.indexOf('@') > -1) {
+       try { folder.addViewer(payload.email); } catch(e) {}
+     }
   }
-
-  let nssString = payload.nss || "";
-  if (payload.nssList && Array.isArray(payload.nssList) && payload.nssList.length > 0) {
-    nssString = payload.nssList.join(", ");
-  }
-
-  // MAPEO EXACTO A TUS 22 COLUMNAS
-  const rowData = [
-    curp10,                                   // A: id (CURP10 forzado)
-    payload.nombre,                           // B: Nombre
-    payload.apellidos || "",                  // C: Apellidos
-    payload.curp,                             // D: CURP
-    nssString,                                // E: # NSS
-    payload.rfc || "",                        // F: RFC
-    payload.whatsapp || "",                   // G: WhatsApp
-    payload.email || "",                      // H: Email
-    payload.selfie_url || "",                 // I: SelfieURL
-    payload.comprobantedomiciliourl || "",    // J: ComprobanteDomicilioUrl
-    payload.domicilioExtraido || "",          // K: DomicilioExtraido
-    folderId,                                 // L: ID_Carpeta_Drive
-    new Date().toISOString(),                 // M: CreatedAt
-    payload.regimenFiscal || "",              // N: Régimen Fiscal
-    payload.semanasCotizadas || 0,            // O: Semanas Cotizadas
-    payload.ultimoSalario || 0,               // P: Último Salario
-    "PENDIENTE_ENTREVISTA",                   // Q: Estado Auditoría
-    payload.notasSeguimiento || "",           // R: Notas Seguimiento
-    payload.nivelCerteza || "Bajo",           // S: Nivel Certeza
-    payload.desgloseSemanas || "",            // T: Desglose de Semanas
-    "PENDIENTE",                              // U: estatusfirma
-    payload.ine_url || ""                     // V: ine_url
-  ];
+  mapUpdate(11, folderId);                                   // L: ID_Carpeta_Drive
+  
+  if (!rowData[12]) mapUpdate(12, new Date().toISOString()); // M: CreatedAt
+  mapUpdate(13, payload.regimenFiscal);                      // N: Régimen Fiscal
+  mapUpdate(14, payload.semanasCotizadas);                   // O: Semanas Cotizadas
+  mapUpdate(15, payload.ultimoSalario);                      // P: Último Salario
+  mapUpdate(16, payload.estadoAuditoria || "PENDIENTE_ENTREVISTA"); // Q: Estado Auditoría
+  mapUpdate(17, payload.notasSeguimiento);                   // R: Notas Seguimiento
+  mapUpdate(18, payload.nivelCerteza);                      // S: Nivel Certeza
+  mapUpdate(19, payload.desgloseSemanas);                     // T: Desglose de Semanas
+  mapUpdate(20, payload.estatusfirma || rowData[20] || "PENDIENTE"); // U: estatusfirma
+  mapUpdate(21, payload.ine_url);                             // V: ine_url
 
   if (existingRowIndex > -1) {
     sheet.getRange(existingRowIndex + 1, 1, 1, rowData.length).setValues([rowData]);
@@ -147,11 +252,30 @@ function handleCreateCliente(payload) {
 }
 
 function handleCreateHoja(payload) {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("HOJAS_SERVICIO");
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = ss.getSheetByName("HOJAS_SERVICIO");
+  if (!sheet) {
+    sheet = ss.insertSheet("HOJAS_SERVICIO");
+    sheet.appendRow(["ID_Hoja", "ID_Cliente", "Universo", "Servicios", "Monto", "Diagnostico", "Status", "Fecha"]);
+  }
+  
+  // BLINDAJE: servicios puede venir como Array o como String ya unido
+  let serviciosStr = "";
+  if (Array.isArray(payload.servicios)) {
+    serviciosStr = payload.servicios.join(", ");
+  } else {
+    serviciosStr = payload.servicios || "";
+  }
+  
   sheet.appendRow([
-    payload.id, payload.clienteId, payload.universo, 
-    payload.servicios.join(", "), payload.honorariosAcordados, 
-    payload.notasDiagnostico, "", payload.createdAt
+    payload.id || Utilities.getUuid(),                         // A: ID Hoja (Generado si no viene)
+    payload.clienteId || payload.id,                          // B: ID Cliente
+    payload.universo || "U1",                                  // C: Universo
+    serviciosStr,                                              // D: Servicios
+    payload.honorariosAcordados || payload.monto || 0,         // E: Monto
+    payload.notasDiagnostico || payload.dictamen || "",        // F: Diagnostico
+    "ACTIVO",                                                  // G: Status
+    payload.createdAt || new Date().toISOString()              // H: Fecha
   ]);
   return createResponse({ success: true });
 }
@@ -203,70 +327,32 @@ function getSheetData(name) {
 
 function handleLogin(incomingEmail) {
   if (!incomingEmail) return createResponse({ success: false, error: 'Email requerido' }, 400);
-
   const cleanIncomingEmail = incomingEmail.toString().replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase();
-
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName("USUARIOS");
-  
   if (!sheet) {
     sheet = ss.insertSheet("USUARIOS");
     sheet.appendRow(["Email", "Rol", "Nombre"]);
   }
-
-  const values = sheet.getDataRange().getValues();
-  if (values.length < 2) return createResponse({ success: false, error: 'No hay usuarios autorizados' }, 404);
-
-  const headers = values[0].map(h => h.toString().toLowerCase().trim());
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return createResponse({ success: false, error: 'No hay usuarios autorizados' }, 404);
+  const headers = data[0].map(h => h.toString().toLowerCase().trim());
   const emailCol = headers.indexOf('email');
-  const rolCol = headers.indexOf('rol');
-  const nombreCol = headers.indexOf('nombre');
-
-  if (emailCol === -1) return createResponse({ success: false, error: 'Columna email no encontrada' }, 500);
-
-  for (let i = 1; i < values.length; i++) {
-    const row = values[i];
-    const sheetEmail = row[emailCol] ? row[emailCol].toString().replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase() : "";
+  for (let i = 1; i < data.length; i++) {
+    const sheetEmail = data[i][emailCol] ? data[i][emailCol].toString().trim().toLowerCase() : "";
     if (sheetEmail === cleanIncomingEmail) {
-      
-      // REGISTRO DE LOGS ESTRICTO
-      let logSheet = ss.getSheetByName("LOGS");
-      if (!logSheet) {
-        logSheet = ss.insertSheet("LOGS");
-        logSheet.appendRow(["FechaHora", "Usuario", "Accion", "Detalles"]);
-      }
-      const fechaExacta = new Date();
-      logSheet.appendRow([fechaExacta, cleanIncomingEmail, "LOGIN EXITOSO", `Acceso autorizado (Rol: ${rolCol > -1 ? row[rolCol] : "ASESOR"})`]);
-
       return createResponse({
         success: true,
-        user: {
-          email: sheetEmail,
-          rol: rolCol > -1 ? row[rolCol].toString().trim() : "ASESOR",
-          nombre: nombreCol > -1 ? row[nombreCol].toString().trim() : sheetEmail
-        }
+        user: { email: data[i][0], rol: data[i][1], nombre: data[i][2] }
       });
     }
   }
-
-  // Si falló, registrar fallo también
-  let logSheet = ss.getSheetByName("LOGS");
-  if (!logSheet) {
-    logSheet = ss.insertSheet("LOGS");
-    logSheet.appendRow(["FechaHora", "Usuario", "Accion", "Detalles"]);
-  }
-  logSheet.appendRow([new Date(), cleanIncomingEmail, "LOGIN FALLIDO", "Usuario no encontrado en BBDD"]);
-
-  return createResponse({ success: false, error: `Usuario ${cleanIncomingEmail} no autorizado en la base de datos de Social Push` }, 401);
+  return createResponse({ success: false, error: `Usuario ${cleanIncomingEmail} no autorizado` }, 401);
 }
 
 function handleLogAction(payload, email) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let logSheet = ss.getSheetByName("LOGS");
-  if (!logSheet) {
-    logSheet = ss.insertSheet("LOGS");
-    logSheet.appendRow(["FechaHora", "Usuario", "Accion", "Detalles"]);
-  }
+  let logSheet = ss.getSheetByName("LOGS") || ss.insertSheet("LOGS");
   logSheet.appendRow([new Date(), email || "Desconocido", payload.accion || "INFO", payload.detalles || ""]);
   return createResponse({ success: true });
 }

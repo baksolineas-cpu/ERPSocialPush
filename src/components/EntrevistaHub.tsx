@@ -81,7 +81,12 @@ export default function EntrevistaHub() {
     nivelCerteza: 'Bajo',
     semanasExtra: 0,
     semanasExtraDictaminadas: 0,
-    metadatosAuditoria: { alertas: [], discrepancias: [] }
+    metadatosAuditoria: { 
+      metodoCaptura: 'Manual', 
+      matchDocumental: false, 
+      alertas: [], 
+      discrepancias: [] 
+    }
   });
 
   const [hojaServicio, setHojaServicio] = useState({
@@ -99,27 +104,47 @@ export default function EntrevistaHub() {
   const [pendingUploads, setPendingUploads] = useState<{ [key: string]: string }>({});
   const [auditLog, setAuditLog] = useState<{fecha: string, accion: string}[]>([]);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
+  const [toasts, setToasts] = useState<{id: number, message: string, type: 'info' | 'error' | 'success'}[]>([]);
 
-  // Polling de Estatus de Firma en Tiempo Real
+  const addToast = (message: string, type: 'info' | 'error' | 'success' = 'info') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 5000);
+  };
+
+  // --- MONITOR DE FIRMA EN TIEMPO REAL (UNIFICADO) ---
   useEffect(() => {
     let interval: NodeJS.Timeout;
+    // Solo polleamos en Paso 4 si tenemos un ID válido y no está firmado aún
     const isValidId = data.id && !data.id.startsWith('NEW_') && data.id.length >= 10;
+    
     if (activeStep === 4 && isValidId && data.estatusfirma !== 'FIRMADO') {
       interval = setInterval(async () => {
         try {
           const res = await getGASData('GET_CLIENTE_STATUS', { curp: data.id });
-          if (res?.data?.estatusfirma === 'FIRMADO') {
-            setData(prev => ({ ...prev, estatusfirma: 'FIRMADO' }));
-            setShowSuccessOverlay(true);
-            registrarAccion("¡Expediente firmado por el cliente detectado!");
-            clearInterval(interval);
+          
+          if (res?.status === 'success' && res.data) {
+            if (res.data.estatusfirma === 'FIRMADO' || res.data.estatusfirma === 'FORMALIZADO') {
+              updateData({ estatusfirma: 'FIRMADO' });
+              setShowSuccessOverlay(true);
+              registrarAccion("¡Expediente firmado por el cliente detectado!");
+              clearInterval(interval);
+            }
+          } else if (res?.status === 'error') {
+            // Si el backend dice error (ej. no encontrado), no spameamos logs de éxito
+            console.warn("Polling: Cliente no encontrado aún o error de servidor.");
           }
         } catch (err) {
-          console.error("Error en polling:", err);
+          console.error("Error en polling de estatus:", err);
         }
       }, 5000);
     }
-    return () => clearInterval(interval);
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [activeStep, data.id, data.estatusfirma]);
 
   const registrarAccion = (texto: string) => setAuditLog(prev => [{fecha: new Date().toLocaleTimeString(), accion: texto}, ...prev]);
@@ -127,18 +152,6 @@ export default function EntrevistaHub() {
   const updateData = (newData: Partial<Cliente>) => {
     setData(prev => ({ ...prev, ...newData }));
   };
-
-  // --- MONITOR DE FIRMA EN TIEMPO REAL (POLLING) ---
-  useEffect(() => {
-    if (activeStep !== 4 || !data.id || data.id.startsWith('NEW_')) return;
-    const interval = setInterval(async () => {
-      const res = await getGASData('GET_CLIENTE_STATUS', { curp: data.id });
-      if (res?.data?.estatusfirma === 'FIRMADO' || res?.data?.estatusfirma === 'FORMALIZADO') {
-        updateData({ estatusfirma: 'FIRMADO' });
-      }
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [activeStep, data.id]);
 
   const handleSearch = async () => {
     const cleanCurp = curpSearch.toUpperCase().replace(/\s+/g, '').trim();
@@ -167,7 +180,7 @@ export default function EntrevistaHub() {
   const handleNewClient = () => {
     const tempId = `NEW_${Date.now().toString().slice(-6)}`;
     setData({
-      id: tempId, estatusfirma: 'PENDIENTE', expedienteExistingFiles: {}, nombre: '', curp: '', rfc: '', nss: '', nssList: [], whatsapp: '', email: '', semanasCotizadas: 0, semanasExtra: 0, metadatosAuditoria: { alertas: [], discrepancias: [] }
+      id: tempId, estatusfirma: 'PENDIENTE', expedienteExistingFiles: {}, nombre: '', curp: '', rfc: '', nss: '', nssList: [], whatsapp: '', email: '', semanasCotizadas: 0, semanasExtra: 0, metadatosAuditoria: { metodoCaptura: 'Manual', matchDocumental: false, alertas: [], discrepancias: [] }
     });
     setLockedFields(new Set());
     setActiveStep(2);
@@ -208,6 +221,7 @@ export default function EntrevistaHub() {
     }, 400);
 
     try {
+      addToast(`Analizando ${type.toUpperCase()}...`, 'info');
       const reader = new FileReader();
       const base64 = await new Promise<string>((resolve) => {
         reader.onload = () => resolve(reader.result as string);
@@ -229,37 +243,43 @@ export default function EntrevistaHub() {
           if (extracted.curp && extracted.curp.length === 18) { updatePayload.curp = extracted.curp; newLocked.add('curp'); }
           if (extracted.domicilio) { updatePayload.domicilio = extracted.domicilio; newLocked.add('domicilio'); }
           registrarAccion(`Identidad (INE) procesada vía OCR.`);
+          addToast("INE validada correctamente", 'success');
         } else if (type === 'csf') {
           if (extracted.rfc) { updatePayload.rfc = extracted.rfc; newLocked.add('rfc'); }
           if (extracted.curp && extracted.curp.length === 18) { updatePayload.curp = extracted.curp; newLocked.add('curp'); }
           if (extracted.nombre && !data.nombre) { updatePayload.nombre = extracted.nombre; newLocked.add('nombre'); }
           if (extracted.regimenFiscal) { updatePayload.regimenFiscal = extracted.regimenFiscal; newLocked.add('regimenFiscal'); }
           registrarAccion(`Constancia Fiscal procesada vía OCR.`);
+          addToast("CSF validada correctamente", 'success');
         } else if (type === 'semanas') {
           if (extracted.nss) { updatePayload.nss = extracted.nss; newLocked.add('nss'); }
           if (extracted.semanasCotizadas > 0) { updatePayload.semanasCotizadas = extracted.semanasCotizadas; newLocked.add('semanasCotizadas'); }
           if (extracted.ultimoSalario > 0) { updatePayload.ultimoSalario = extracted.ultimoSalario; newLocked.add('ultimoSalario'); }
           registrarAccion(`Reporte de Semanas procesado vía OCR.`);
+          addToast("Semanas IMSS extraídas", 'success');
         } else if (type === 'domicilio') {
           if (extracted.domicilio) { updatePayload.domicilio = extracted.domicilio; newLocked.add('domicilio'); }
           registrarAccion(`Domicilio extraído. Identidad protegida (nombre de tercero ignorado).`);
+          addToast("Domicilio validado", 'success');
         } else if (type === 'complementario') {
           const nuevasAlertas = [...((data.metadatosAuditoria as any)?.alertas || [])];
           if (extracted.tipo_complemento === 'Hoja Rosa') {
             const msg = '⚠️ Evidencia detectada: Este documento es sustento legal para un Trámite de Búsqueda de Semanas Manual.';
             nuevasAlertas.push(msg);
-            alert(msg);
+            addToast("Hoja Rosa Detectada", 'info');
           }
           updatePayload.metadatosAuditoria = { ...data.metadatosAuditoria, alertas: nuevasAlertas } as any;
           if (extracted.tipo_complemento === 'Resolución' && extracted.semanas_extra > 0) {
             updatePayload.semanasExtraDictaminadas = extracted.semanas_extra;
             newLocked.add('semanasExtraDictaminadas');
+            addToast(`Resolución: ${extracted.semanas_extra} semanas extra`, 'success');
           }
           registrarAccion(`Doc Complementario procesado: ${extracted.tipo_complemento}`);
         } else {
           // Fallback para otros documentos
            Object.assign(updatePayload, extracted);
            registrarAccion(`Archivo ${type.toUpperCase()} cargado y validado vía OCR.`);
+           addToast(`${type.toUpperCase()} cargado`, 'success');
         }
         
         setLockedFields(newLocked);
@@ -270,7 +290,9 @@ export default function EntrevistaHub() {
         updateData({ expedienteExistingFiles: { ...data.expedienteExistingFiles, [type]: true } });
         setFileProgress(prev => ({ ...prev, [type]: 100 }));
         if (ocrError?.message && ocrError.message.includes("Cuota de IA excedida")) {
-           alert("Alerta: Se ha excedido la cuota de la Inteligencia Artificial. El documento se cargará pero sus datos no podrán extraerse automáticamente. Por favor, llena los campos a mano.");
+           addToast("Cuota de IA excedida. Captura manualmente.", 'error');
+        } else {
+           addToast(`Error al procesar ${type.toUpperCase()}`, 'error');
         }
         registrarAccion(`Archivo ${type.toUpperCase()} cargado (fallo OCR: ${ocrError?.message || 'Error desconocido'}).`);
       }
@@ -297,7 +319,14 @@ export default function EntrevistaHub() {
 
   const handleSiguientePasoDocs = async () => {
     if (data.id?.startsWith('NEW_')) {
-      if (!data.nombre || !data.curp || data.curp.length !== 18) { alert("La CURP de 18 caracteres y Nombre son obligatorios."); return; }
+      if (!data.nombre) {
+        addToast("El nombre del cliente es obligatorio.", 'error');
+        return;
+      }
+      if (!data.curp || data.curp.length !== 18) {
+        addToast("Error: La CURP es obligatoria y debe tener exactamente 18 caracteres.", 'error');
+        return;
+      }
       setIsProcessing(true);
       try {
         const curp10 = data.curp.substring(0, 10).toUpperCase();
@@ -319,12 +348,13 @@ export default function EntrevistaHub() {
           }
           updateData({ id: curp10, id_carpeta_drive: idCarpetaDrive });
           setActiveStep(3);
+          addToast("Expediente creado correctamente", 'success');
         } else {
-           alert(res?.error || "Hubo un problema al crear el expediente. Intenta de nuevo.");
+           addToast(res?.error || "Hubo un problema al crear el expediente.", 'error');
         }
       } catch (err: any) {
          console.error(err);
-         alert("Error de conexión al crear expediente.");
+         addToast("Error de conexión al crear expediente.", 'error');
       } finally { setIsProcessing(false); }
     } else {
       setActiveStep(3);
@@ -333,22 +363,26 @@ export default function EntrevistaHub() {
 
   const redactarIA = async () => {
     setIsAiDrafting(true);
+    addToast("Generando diagnóstico con IA...", 'info');
     try {
-      const promptText = `Basado en estas intenciones y necesidades que el asesor detectó: ${iaContext}, y los datos técnicos del caso: Semanas IMSS=${data.semanasCotizadas}, Edad=${calculateDetailedAge(data.curp || '').years}, Salario=${data.ultimoSalario}, redacta un diagnóstico inicial profesional dirigido al cliente.`;
+      const edad = calculateDetailedAge(data.curp || '');
+      const edadTexto = edad ? `${edad.anios} años` : 'Desconocida';
+      const promptText = `Basado en estas intenciones y necesidades que el asesor detectó: ${iaContext}, y los datos técnicos del caso: Semanas IMSS=${data.semanasCotizadas}, Edad=${edadTexto}, Salario=${data.ultimoSalario}, redacta un diagnóstico inicial profesional dirigido al cliente.`;
       const draft = await getConsultorChatResponse([{ role: 'user', parts: [{ text: promptText }] }], data);
       setHojaServicio(prev => ({ ...prev, notasDiagnostico: draft }));
+      addToast("Diagnóstico redactado", 'success');
     } catch (error: any) {
-      alert(`Error de IA: ${error.message || 'Desconocido'}`);
+      addToast(`Error de IA: ${error.message || 'Desconocido'}`, 'error');
     } finally { setIsAiDrafting(false); }
   };
 
   const handleSiguientePasoDictamen = () => {
     if (hojaServicio.servicios.length === 0 && !hojaServicio.otroServicioTexto) {
-      alert("Debes seleccionar o especificar al menos un servicio.");
+      addToast("Selecciona al menos un servicio para continuar.", 'error');
       return;
     }
     if (!hojaServicio.notasDiagnostico.trim()) {
-      alert("El diagnóstico no puede estar vacío.");
+      addToast("El diagnóstico técnico no puede estar vacío.", 'error');
       return;
     }
     setActiveStep(4);
@@ -356,7 +390,7 @@ export default function EntrevistaHub() {
 
   const handleFinalizarCertificacion = async (method: 'whatsapp' | 'email') => {
     if (!asesorNombre || sigCanvasAsesor.current?.isEmpty()) {
-      alert("El asesor debe firmar la hoja de diagnóstico antes de enviarla."); return;
+      addToast("El asesor debe firmar antes de formalizar el envío.", 'error'); return;
     }
     
     // Open window synchronously to bypass popup blockers on mobile/safari
@@ -372,8 +406,9 @@ export default function EntrevistaHub() {
 
     try {
       // 5. MATERIALIDAD Y PDF (APPS SCRIPT) - Acción FINALIZE_AUDIT
+      // Enviamos el objeto 'data' completo para que el merge en GAS no pierda información (Nombre, CURP, etc)
       const res = await callGAS('FINALIZE_AUDIT', {
-        clienteId: data.id,
+        ...data,
         asesor: asesorNombre,
         firmaAsesor,
         dictamen: hojaServicio.notasDiagnostico,
@@ -386,27 +421,34 @@ export default function EntrevistaHub() {
          // 2. FILTRO INTELIGENTE DE CONTRATO
          const yaTieneContrato = data.contratourl && data.contratourl.length > 5;
          const tipoDoc = yaTieneContrato ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
-         const link = `${window.location.origin}/firma-externa/${data.id}?tipoDoc=${tipoDoc}`;
+         
+         // URL robusta para el portal de firma
+         const baseUrl = window.location.origin;
+         const link = `${baseUrl}/firma-externa/${data.id}?tipoDoc=${tipoDoc}`;
          
          const mensaje = `Hola ${data.nombre}, soy ${asesorNombre} de Social Push®. Hemos generado tu ${yaTieneContrato ? 'Hoja de Diagnóstico' : 'Contrato y Diagnóstico'} técnico. Por favor, revísalo y fírmalo aquí: ${link}`;
          const asunto = `Formalización de Expediente Digital - Social Push® (${tipoDoc})`;
 
          if (method === 'whatsapp') {
-            const url = `https://wa.me/52${(data.whatsapp || '').replace(/\D/g, '')}?text=${encodeURIComponent(mensaje)}`;
+            // En México, para links de WA, se recomienda 52 + 10 dígitos (o 521 si es necesario para algunos sistemas antiguos)
+            // Probamos con el estándar actual: 52 + 10 dígitos
+            const phone = (data.whatsapp || '').toString().replace(/\D/g, '');
+            const waNumber = phone.length === 10 ? `52${phone}` : phone;
+            const url = `https://wa.me/${waNumber}?text=${encodeURIComponent(mensaje)}`;
             if (popupWindow) popupWindow.location.href = url;
          } else {
             window.location.href = `mailto:${data.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(mensaje)}`;
          }
          
          registrarAccion(`Expediente Certificado. Notificación enviada vía ${method} (${tipoDoc}).`);
-         alert("Expediente Certificado y Guardado Exitosamente. El link ha sido enviado.");
+         addToast("Expediente Certificado y Enviado", 'success');
       } else {
          if (popupWindow) popupWindow.close();
-         alert("La certificación falló. Inténtalo de nuevo.");
+         addToast("La certificación falló", 'error');
       }
     } catch (e) {
       if (popupWindow) popupWindow.close();
-      alert("Error al finalizar: " + e);
+      addToast("Error al finalizar", 'error');
     } finally { setIsProcessing(false); }
   };
 
@@ -459,11 +501,10 @@ export default function EntrevistaHub() {
         )}
 
         {activeStep === 2 && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in fade-in">
-             <div className="lg:col-span-8 space-y-8">
-                <div className="bg-white p-10 rounded-[48px] shadow-2xl border border-slate-100 space-y-8">
-                    <div className="flex items-center gap-4 border-b border-slate-100 pb-6"><FileSearch size={28} className="text-[#003366]"/><h3 className="text-2xl font-black text-[#003366] uppercase">1. Digitalización Segura</h3></div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-8 animate-in fade-in">
+            <div className="bg-white p-10 rounded-[48px] shadow-2xl border border-slate-100 space-y-8">
+                <div className="flex items-center gap-4 border-b border-slate-100 pb-6"><FileSearch size={28} className="text-[#003366]"/><h3 className="text-2xl font-black text-[#003366] uppercase">1. Digitalización Segura</h3></div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {[
                           { id: 'ine', label: 'INE Oficial', sub: 'Anverso y Reverso' }, 
                           { id: 'csf', label: 'Constancia Fiscal', sub: 'Extrae RFC y CP' },
@@ -509,8 +550,6 @@ export default function EntrevistaHub() {
                         })}
                     </div>
                 </div>
-             </div>
-             <div className="lg:col-span-4">{/* Panel de Auditoría siempre visible */}</div>
           </div>
         )}
 
@@ -674,8 +713,32 @@ export default function EntrevistaHub() {
       </main>
 
       {/* PANEL DERECHO (AUDITORÍA) */}
+      <div className="fixed bottom-10 right-10 z-[100] flex flex-col gap-3 pointer-events-none">
+        <AnimatePresence>
+          {toasts.map(toast => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, x: 50, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
+              className={cn(
+                "px-6 py-4 rounded-2xl shadow-2xl pointer-events-auto border flex items-center gap-3 min-w-[300px]",
+                toast.type === 'info' && "bg-[#003366] text-white border-white/20",
+                toast.type === 'error' && "bg-red-500 text-white border-red-600",
+                toast.type === 'success' && "bg-emerald-500 text-white border-emerald-600"
+              )}
+            >
+              {toast.type === 'info' && <Loader2 size={18} className="animate-spin" />}
+              {toast.type === 'error' && <AlertCircle size={18} />}
+              {toast.type === 'success' && <CheckCircle2 size={18} />}
+              <span className="text-xs font-black uppercase tracking-widest">{toast.message}</span>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
       {activeStep > 1 && (
-        <aside className="sticky top-28 w-80 xl:w-96 h-[calc(100vh-140px)] flex-shrink-0 bg-[#003366] p-8 pb-8 rounded-[48px] text-white shadow-2xl space-y-8 hidden xl:flex flex-col overflow-y-auto custom-scrollbar">
+        <aside className="sticky top-28 w-80 xl:w-96 h-[calc(100vh-140px)] flex-shrink-0 bg-[#003366] p-8 pb-8 rounded-[48px] text-white shadow-2xl space-y-8 hidden lg:flex flex-col overflow-y-auto custom-scrollbar">
             <div className="flex items-center gap-3 border-b border-white/10 pb-4"><Activity size={24} className="text-[#DAA520]" /><h4 className="text-lg font-black uppercase tracking-tighter">Panel de Auditoría</h4></div>
             
             <div className="space-y-5">
@@ -750,11 +813,6 @@ export default function EntrevistaHub() {
                 <AuditoriaInput registrarAccion={registrarAccion} label="CURP Oficial" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
                 <AuditoriaInput registrarAccion={registrarAccion} label="RFC Fiscal" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
                 
-                <div className="grid grid-cols-2 gap-4">
-                  <AuditoriaInput registrarAccion={registrarAccion} label="Semanas Busqueda (Complemento)" value={data.semanasExtraDictaminadas} fieldKey="semanasExtraDictaminadas" isLocked={lockedFields.has('semanasExtraDictaminadas')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasExtraDictaminadas'); setLockedFields(s); }} onChange={(v:any)=>updateData({semanasExtraDictaminadas: v})} />
-                  <AuditoriaInput registrarAccion={registrarAccion} label="Semanas Extra (Regaladas)" value={data.semanasExtra} fieldKey="semanasExtra" isLocked={lockedFields.has('semanasExtra')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasExtra'); setLockedFields(s); }} onChange={(v:any)=>updateData({semanasExtra: v})} />
-                </div>
-
                 <AuditoriaInput registrarAccion={registrarAccion} label="NSS IMSS" value={data.nss} fieldKey="nss" isLocked={lockedFields.has('nss')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nss'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nss} onChange={(v:any)=>updateData({nss:v})} />
                 
                 <div className="grid grid-cols-2 gap-4">

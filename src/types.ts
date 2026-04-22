@@ -2,7 +2,7 @@ export type UniversoServicio = 'U1' | 'U2';
 export type EstatusGestion = 'Pendiente' | 'Recurso Recibido' | 'Pagado IMSS' | 'Finalizado';
 export type UserRole = 'Admin' | 'Promoción';
 export type EstatusExpediente = 'Completo' | 'Pendiente de Gestoría';
-export type NivelCerteza = 'Alto' | 'Bajo - Sujeto a Verificación';
+export type NivelCerteza = 'Alto' | 'Bajo - Sujeto a Verificación' | 'Bajo';
 
 export interface User {
   email: string;
@@ -39,6 +39,10 @@ export interface Cliente {
   semanasCotizadas?: number;
   ultimoSalario?: number;
   salarioPromedio?: number;
+  semanasExtra?: number;
+  semanasExtraDictaminadas?: number;
+  regimenFiscal?: string;
+  contratourl?: string;
   estatusExpediente?: EstatusExpediente;
   notasSeguimiento?: string;
   contextoAsesor?: string;
@@ -61,6 +65,7 @@ export interface Cliente {
   statusSignature?: string;
   idCarpetaDrive?: string;
   idcarpetadrive?: string;
+  id_carpeta_drive?: string;
   drive_verificado?: boolean;
   contrato_url?: string;
   firma_url?: string;
@@ -90,6 +95,7 @@ export interface Cliente {
     timestampOperacion?: number;
     ipCaptura?: string;
     timestampFirma?: number;
+    alertas?: string[];
     discrepancias?: {
       campo: string;
       doc1: string;

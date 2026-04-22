@@ -32,8 +32,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (response && response.success && response.user) {
         const userData: User = { 
           email: response.user.email, 
-          rol: response.user.rol, 
-          nombre: response.user.nombre 
+          role: response.user.rol || response.user.role, 
+          name: response.user.nombre || response.user.name 
         };
         setUser(userData);
         localStorage.setItem('bakso_user', JSON.stringify(userData));
