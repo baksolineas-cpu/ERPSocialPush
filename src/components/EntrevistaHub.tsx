@@ -93,6 +93,7 @@ export default function EntrevistaHub() {
 
   const [iaContext, setIaContext] = useState('');
   const [isAiDrafting, setIsAiDrafting] = useState(false);
+  const [fileProgress, setFileProgress] = useState<{[key: string]: number}>({});
   const [asesorNombre, setAsesorNombre] = useState('');
   const [pendingUploads, setPendingUploads] = useState<{ [key: string]: string }>({});
   const [auditLog, setAuditLog] = useState<{fecha: string, accion: string}[]>([]);
@@ -171,6 +172,17 @@ export default function EntrevistaHub() {
     setIsProcessing(true);
     setAnalyzingCount(prev => prev + 1);
     setUploadingId(type);
+    setFileProgress(prev => ({ ...prev, [type]: 5 }));
+    
+    // Simular progreso de análisis
+    const progressInterval = setInterval(() => {
+      setFileProgress(prev => {
+        const current = prev[type] || 0;
+        if (current < 90) return { ...prev, [type]: current + Math.floor(Math.random() * 5) + 2 };
+        return prev;
+      });
+    }, 400);
+
     try {
       const reader = new FileReader();
       const base64 = await new Promise<string>((resolve) => {
@@ -178,8 +190,11 @@ export default function EntrevistaHub() {
         reader.readAsDataURL(file);
       });
       
+      setFileProgress(prev => ({ ...prev, [type]: 30 }));
+      
       try {
         const extracted = await extractDocumentData(base64, file.type, type.toUpperCase());
+        setFileProgress(prev => ({ ...prev, [type]: 85 }));
         const updatePayload: any = { expedienteExistingFiles: { ...data.expedienteExistingFiles, [type]: true } };
 
         // Mapeo Inteligente Basado en el Tipo de Documento Oficial
@@ -223,9 +238,11 @@ export default function EntrevistaHub() {
         
         setLockedFields(newLocked);
         updateData(updatePayload);
+        setFileProgress(prev => ({ ...prev, [type]: 100 }));
       } catch (ocrError: any) {
         console.error("OCR Process Failed:", ocrError);
         updateData({ expedienteExistingFiles: { ...data.expedienteExistingFiles, [type]: true } });
+        setFileProgress(prev => ({ ...prev, [type]: 100 }));
         if (ocrError?.message && ocrError.message.includes("Cuota de IA excedida")) {
            alert("Alerta: Se ha excedido la cuota de la Inteligencia Artificial. El documento se cargará pero sus datos no podrán extraerse automáticamente. Por favor, llena los campos a mano.");
         }
@@ -238,9 +255,17 @@ export default function EntrevistaHub() {
         callGAS('UPLOAD_FILE', { fileName: `${type.toUpperCase()}_${data.id}.pdf`, fileData: base64.split(',')[1], id_carpeta_drive: data.id_carpeta_drive || data.idcarpetadrive });
       }
     } finally { 
+       clearInterval(progressInterval);
        setIsProcessing(false); 
        setAnalyzingCount(prev => Math.max(0, prev - 1));
        setUploadingId(null); 
+       setTimeout(() => {
+         setFileProgress(prev => {
+            const n = {...prev};
+            delete n[type];
+            return n;
+         });
+       }, 2000);
     }
   };
 
@@ -367,6 +392,11 @@ export default function EntrevistaHub() {
 
       <div className={cn("flex-1 w-full mx-auto flex items-start", activeStep > 1 ? "max-w-[1600px] gap-8 px-6 lg:px-8 py-6" : "max-w-7xl")}>
         <main className={cn("flex-1 w-full min-w-0 origin-top", activeStep <= 1 && "p-6 md:p-8")}>
+        {analyzingCount > 0 && (
+           <div className="fixed top-[72px] left-0 right-0 h-1 z-50 overflow-hidden bg-slate-200">
+             <div className="h-full bg-[#DAA520] animate-[shimmer_2s_infinite] transition-all duration-500" style={{ width: `${Math.min(95, (Object.values(fileProgress).reduce((a, b) => a + b, 0) / analyzingCount))}%` }} />
+           </div>
+        )}
         {activeStep === 1 && (
           <div className="max-w-4xl mx-auto space-y-10 py-10">
             <div className="bg-white p-10 rounded-[48px] shadow-2xl border border-slate-100 space-y-8">
@@ -423,9 +453,24 @@ export default function EntrevistaHub() {
                                  <p className="text-sm font-black uppercase leading-none text-slate-900">{doc.label}</p>
                                  <p className="text-[9px] font-bold text-slate-400 uppercase mt-1">{doc.sub}</p>
                               </div>
-                              <button onClick={() => { activeUploadRef.current = doc.id; fileInputRef.current?.click(); }} className={cn("w-full py-3 rounded-xl font-black text-[10px] uppercase shadow-sm transition-all", exists ? "bg-white text-emerald-600 border border-emerald-100" : "bg-[#003366] text-white")}>
-                                 {uploadingId === doc.id ? <Loader2 className="animate-spin" size={14}/> : (exists ? "Auditado ✅" : "Subir Archivo")}
+                              <button onClick={() => { activeUploadRef.current = doc.id; fileInputRef.current?.click(); }} disabled={uploadingId === doc.id} className={cn("w-full py-3 rounded-xl font-black text-[10px] uppercase shadow-sm transition-all relative overflow-hidden", exists ? "bg-white text-emerald-600 border border-emerald-100" : "bg-[#003366] text-white")}>
+                                 {uploadingId === doc.id ? (
+                                    <>
+                                       <div className="absolute inset-0 bg-[#002244] z-0" />
+                                       <div 
+                                          className="absolute inset-y-0 left-0 bg-[#DAA520] transition-all duration-300 z-10" 
+                                          style={{ width: `${fileProgress[doc.id] || 0}%` }} 
+                                       />
+                                       <span className="relative z-20 flex items-center justify-center gap-2">
+                                          <Loader2 className="animate-spin" size={12}/> 
+                                          {fileProgress[doc.id] < 100 ? "Analizando..." : "Listo ✓"} {fileProgress[doc.id] || 0}%
+                                       </span>
+                                    </>
+                                 ) : (exists ? "Auditado ✅" : "Subir Archivo")}
                               </button>
+                              {uploadingId === doc.id && (
+                                <p className="text-[8px] font-black uppercase text-[#DAA520] animate-pulse">Procesando OCR con Gemini...</p>
+                              )}
                             </div>
                           );
                         })}
