@@ -97,6 +97,28 @@ export default function EntrevistaHub() {
   const [asesorNombre, setAsesorNombre] = useState('');
   const [pendingUploads, setPendingUploads] = useState<{ [key: string]: string }>({});
   const [auditLog, setAuditLog] = useState<{fecha: string, accion: string}[]>([]);
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
+
+  // Polling de Estatus de Firma en Tiempo Real
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (activeStep === 4 && data.id && data.estatusfirma !== 'FIRMADO') {
+      interval = setInterval(async () => {
+        try {
+          const res = await getGASData('GET_CLIENTE_STATUS', { id: data.id });
+          if (res?.data?.estatusfirma === 'FIRMADO') {
+            setData(prev => ({ ...prev, estatusfirma: 'FIRMADO' }));
+            setShowSuccessOverlay(true);
+            registrarAccion("¡Expediente firmado por el cliente detectado!");
+            clearInterval(interval);
+          }
+        } catch (err) {
+          console.error("Error en polling:", err);
+        }
+      }, 5000);
+    }
+    return () => clearInterval(interval);
+  }, [activeStep, data.id, data.estatusfirma]);
 
   const registrarAccion = (texto: string) => setAuditLog(prev => [{fecha: new Date().toLocaleTimeString(), accion: texto}, ...prev]);
 
@@ -345,6 +367,7 @@ export default function EntrevistaHub() {
     if (hojaServicio.otroServicioTexto) serviciosFinales.push(hojaServicio.otroServicioTexto);
 
     try {
+      // 5. MATERIALIDAD Y PDF (APPS SCRIPT) - Acción FINALIZE_AUDIT
       const res = await callGAS('FINALIZE_AUDIT', {
         clienteId: data.id,
         asesor: asesorNombre,
@@ -354,19 +377,25 @@ export default function EntrevistaHub() {
         monto: hojaServicio.honorariosAcordados,
         auditLog: JSON.stringify(auditLog)
       });
+
       if (res?.success) {
-         // Ya está guardado, abrimos el método de envío
-         const tipoDoc = !!data.contratourl ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
+         // 2. FILTRO INTELIGENTE DE CONTRATO
+         const yaTieneContrato = data.contratourl && data.contratourl.length > 5;
+         const tipoDoc = yaTieneContrato ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
          const link = `${window.location.origin}/firma-externa/${data.id}?tipoDoc=${tipoDoc}`;
+         
+         const mensaje = `Hola ${data.nombre}, soy ${asesorNombre} de Social Push®. Hemos generado tu ${yaTieneContrato ? 'Hoja de Diagnóstico' : 'Contrato y Diagnóstico'} técnico. Por favor, revísalo y fírmalo aquí: ${link}`;
+         const asunto = `Formalización de Expediente Digital - Social Push® (${tipoDoc})`;
+
          if (method === 'whatsapp') {
-            const mensaje = tipoDoc === 'CONTRATO_Y_DIAGNOSTICO' ? "Formaliza tu Contrato y Diagnóstico Inicial de SOCIAL PUSH aquí: " : "Formaliza tu Diagnóstico Inicial de SOCIAL PUSH aquí: ";
-            const url = `https://wa.me/52${(data.whatsapp || '').replace(/\D/g, '')}?text=${encodeURIComponent(mensaje + link)}`;
+            const url = `https://wa.me/52${(data.whatsapp || '').replace(/\D/g, '')}?text=${encodeURIComponent(mensaje)}`;
             if (popupWindow) popupWindow.location.href = url;
          } else {
-            const asunto = tipoDoc === 'CONTRATO_Y_DIAGNOSTICO' ? "Firma de Contrato y Diagnóstico" : "Firma de Diagnóstico";
-            window.location.href = `mailto:${data.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent("Ingresa aquí: " + link)}`;
+            window.location.href = `mailto:${data.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(mensaje)}`;
          }
-         alert("Expediente Certificado Guardado Exitosamente.");
+         
+         registrarAccion(`Expediente Certificado. Notificación enviada vía ${method} (${tipoDoc}).`);
+         alert("Expediente Certificado y Guardado Exitosamente. El link ha sido enviado.");
       } else {
          if (popupWindow) popupWindow.close();
          alert("La certificación falló. Inténtalo de nuevo.");
@@ -521,27 +550,72 @@ export default function EntrevistaHub() {
         )}
 
         {activeStep === 4 && (
-            <div className="bg-white p-12 rounded-[48px] shadow-2xl border border-slate-100 space-y-10 animate-in slide-in-from-bottom">
-                <div className="text-center space-y-4">
-                    <div className="bg-[#DAA520]/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-inner"><FileSignature size={48} className="text-[#DAA520]" /></div>
-                    <h4 className="text-4xl font-black uppercase text-[#003366] tracking-tighter">3. Sanción y Envío Externa</h4>
-                </div>
-
-                <div className="bg-slate-900 text-white p-8 rounded-[32px] shadow-xl flex items-center justify-between">
-                   <div><h5 className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-1">Servicios Acordados</h5><p className="text-lg font-bold">{hojaServicio.servicios.join(', ')} {hojaServicio.otroServicioTexto}</p></div>
-                   <div className="text-right"><h5 className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-1">Inversión Social</h5><p className="text-4xl font-black text-[#DAA520]">${hojaServicio.honorariosAcordados.toLocaleString()}</p></div>
-                </div>
-
-                <div className="bg-slate-50 p-8 rounded-3xl border border-slate-200 h-96 overflow-y-auto text-xs font-mono text-slate-700 leading-relaxed shadow-inner custom-scrollbar">
-                  <div className="space-y-6">
-                    <div className="border-b border-slate-200 pb-4 text-center"><h3 className="font-black text-lg uppercase text-slate-900">HOJA DE DIAGNÓSTICO TÉCNICO</h3><p className="text-[10px] text-slate-400 mt-1">BAKSO, S.C. | SOCIAL PUSH®</p></div>
-                    <p>BAKSO, S.C. emite el siguiente <strong>diagnóstico inicial</strong> para el C. <strong>{data.nombre || '[NOMBRE COMPLETO]'}</strong>, identificado con CURP <strong>{data.curp || '[CURP]'}</strong> y RFC <strong>{data.rfc || '[RFC]'}</strong>.</p>
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 italic text-slate-900 leading-normal whitespace-pre-wrap">{hojaServicio.notasDiagnostico}</div>
-                    <div className="border-t border-slate-200 pt-6">
-                        <p className="font-black text-slate-900 uppercase">Fundamentación Legal:</p>
-                        <p className="mt-2">La firma electrónica estampada en el portal externo tiene plena validez jurídica conforme al <strong>Artículo 1803 del Código Civil Federal</strong>.</p>
+            <div className="bg-white p-12 rounded-[48px] shadow-2xl border border-slate-100 space-y-10 animate-in slide-in-from-bottom relative">
+                {/* 3. COMUNICACIÓN Y MONITOREO EN TIEMPO REAL - Bloqueo de edición */}
+                {data.estatusfirma === 'FIRMADO' && (
+                  <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-40 rounded-[48px] flex items-center justify-center p-10">
+                    <div className="bg-[#003366] text-white p-12 rounded-[40px] shadow-2xl text-center space-y-6 max-w-sm border-4 border-[#DAA520] animate-bounce">
+                      <CheckCircle2 size={80} className="text-[#DAA520] mx-auto" />
+                      <h3 className="text-2xl font-black uppercase tracking-tighter italic">¡Expediente Formalizado y Guardado con Éxito! ✅</h3>
+                      <p className="text-sm font-bold opacity-80 uppercase leading-tight">El cliente ha certificado el diagnóstico. Este caso ha sido cerrado.</p>
+                      <button onClick={() => window.confirm('¿Cerrar este caso y volver al inicio?') && window.location.reload()} className="w-full py-4 bg-[#DAA520] text-[#003366] rounded-2xl font-black uppercase tracking-widest text-xs hover:scale-105 transition-all">Panel de Inicio</button>
                     </div>
                   </div>
+                )}
+
+                <div className="text-center space-y-4">
+                    <div className="bg-[#DAA520]/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-inner"><FileSignature size={48} className="text-[#DAA520]" /></div>
+                    <h4 className="text-4xl font-black uppercase text-[#003366] tracking-tighter">3. Hoja de Diagnóstico y Servicios</h4>
+                </div>
+
+                <div className="bg-[#003366] text-white p-10 rounded-[40px] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8 border-b-8 border-[#DAA520]">
+                   <div className="flex-1">
+                      <h5 className="text-[10px] font-black uppercase tracking-widest text-[#DAA520] mb-3">Resumen Ejecutivo de Servicios</h5>
+                      <div className="flex flex-wrap gap-2">
+                        {hojaServicio.servicios.map(s => (
+                          <span key={s} className="bg-white/10 px-4 py-1.5 rounded-full text-[10px] font-bold border border-white/10">{s}</span>
+                        ))}
+                        {hojaServicio.otroServicioTexto && <span className="bg-[#DAA520] text-[#003366] px-4 py-1.5 rounded-full text-[10px] font-black">{hojaServicio.otroServicioTexto}</span>}
+                      </div>
+                   </div>
+                   <div className="text-right bg-black/20 p-6 rounded-3xl border border-white/5 shadow-inner min-w-[200px]">
+                      <h5 className="text-[10px] font-black uppercase tracking-widest text-[#DAA520] mb-1">Monto Total de Honorarios</h5>
+                      <p className="text-4xl font-black text-white">${hojaServicio.honorariosAcordados.toLocaleString()}</p>
+                   </div>
+                </div>
+
+                <div className="bg-slate-50 p-10 rounded-[40px] border border-slate-200 h-[450px] overflow-y-auto text-xs font-mono text-slate-700 leading-relaxed shadow-inner custom-scrollbar relative">
+                   {/* Diagnóstico Final Window */}
+                   <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none -rotate-12"><FileText size={160} /></div>
+                   <div className="relative z-10 space-y-8">
+                      <div className="border-b border-slate-200 pb-6 text-center">
+                         <img src="https://picsum.photos/seed/bakso/200/50" alt="BAKSO Logo" className="h-8 mx-auto grayscale mb-4 opacity-50" />
+                         <h3 className="font-black text-xl uppercase text-slate-900 tracking-tighter">CERTIFICACIÓN DE DIAGNÓSTICO TÉCNICO</h3>
+                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.3em] mt-1">BAKSO, S.C. | DIVISIÓN SOCIAL PUSH®</p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-6 text-[10px] uppercase font-black text-slate-400 border-b pb-6">
+                        <div><p>CLIENTE:</p><p className="text-slate-900">{data.nombre}</p></div>
+                        <div><p>CURP:</p><p className="text-slate-900">{data.curp}</p></div>
+                        <div><p>RFC:</p><p className="text-slate-900">{data.rfc}</p></div>
+                      </div>
+                      <div className="bg-white p-8 rounded-3xl border border-slate-200 italic text-slate-900 leading-normal whitespace-pre-wrap text-sm shadow-sm relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-2 h-full bg-[#DAA520]" />
+                        {hojaServicio.notasDiagnostico}
+                      </div>
+                      <div className="border-t border-slate-200 pt-8 flex justify-between items-end">
+                          <div>
+                            <p className="font-black text-slate-900 uppercase text-[10px] tracking-widest mb-4">Fundamentación Legal y Validez:</p>
+                            <p className="max-w-md text-[9px] text-slate-400 leading-tight">La presente certificación y el consentimiento estampado vía firma digital en el portal externo institucional de SOCIAL PUSH® cuentan con plena validez jurídica conforme al Artículo 1803 del Código Civil Federal y leyes supletorias.</p>
+                          </div>
+                          {sigCanvasAsesor.current && !sigCanvasAsesor.current.isEmpty() && (
+                            <div className="text-center">
+                              <img src={sigCanvasAsesor.current.getTrimmedCanvas().toDataURL()} className="h-16 mx-auto mb-1 contrast-125 grayscale" alt="Firma Asesor" />
+                              <div className="h-[1px] w-32 bg-slate-400 mx-auto" />
+                              <p className="text-[8px] font-black uppercase text-slate-400 mt-1">{asesorNombre} (ASESOR CERTIFICADO)</p>
+                            </div>
+                          )}
+                      </div>
+                   </div>
                 </div>
 
                 {/* ADVERTENCIA DE VALIDACION ANTES DE SELLAR */}

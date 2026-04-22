@@ -88,30 +88,46 @@ export default function ExternalSignature() {
           <div className="bg-white p-8 rounded-[40px] shadow-xl border border-slate-100 space-y-8 animate-in slide-in-from-bottom duration-500">
             <div className="text-center space-y-2">
               <h3 className="text-2xl font-black text-slate-900 uppercase">Diagnóstico y Contrato</h3>
-              <p className="text-xs text-slate-500">Revise sus datos personalizados antes de proceder.</p>
+              <p className="text-xs text-slate-500">Portal de Certificación de Expediente Digital</p>
             </div>
             
             <div className="bg-slate-50 p-6 rounded-3xl border space-y-6 max-h-[450px] overflow-y-auto custom-scrollbar shadow-inner">
-               <div className="border-b pb-4">
-                  <p className="text-[10px] font-black text-[#003366] uppercase">Titular del Expediente</p>
-                  <p className="text-lg font-bold text-slate-800 uppercase">{clientData?.nombre || 'Cargando...'}</p>
+               <div className="bg-[#003366] p-6 rounded-2xl text-white shadow-lg">
+                  <p className="text-[10px] font-black uppercase text-[#DAA520] tracking-widest mb-1">Titular del Expediente</p>
+                  <p className="text-xl font-black uppercase tracking-tight">{clientData?.nombre || 'Cargando...'}</p>
+                  <div className="flex gap-4 mt-2 opacity-60 text-[10px] font-mono">
+                    <span>CURP: {clientData?.curp || '---'}</span>
+                    <span>RFC: {clientData?.rfc || '---'}</span>
+                  </div>
                </div>
 
                {tipoDoc.includes('CONTRATO') && (
                  <div className="space-y-4">
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-bold">I. Contrato Marco de Servicios</p>
-                   <iframe 
-                      src={`https://docs.google.com/viewer?url=https://docs.google.com/document/d/12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0/export?format=pdf&embedded=true`} 
-                      className="w-full h-64 rounded-xl border-2 border-slate-200 shadow-sm"
-                      title="Contrato"
-                   />
+                   <div className="flex items-center gap-2 text-slate-400">
+                      <FileText size={14} />
+                      <p className="text-[10px] font-black uppercase tracking-widest font-bold">I. Contrato Marco de Servicios</p>
+                   </div>
+                   <div className="relative group">
+                      <iframe 
+                         src={`https://docs.google.com/viewer?url=https://docs.google.com/document/d/12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0/export?format=pdf&embedded=true`} 
+                         className="w-full h-64 rounded-xl border-2 border-slate-200 shadow-sm"
+                         title="Contrato"
+                      />
+                      <div className="absolute inset-0 border-4 border-emerald-500/0 group-hover:border-emerald-500/10 rounded-xl pointer-events-none transition-all" />
+                   </div>
                  </div>
                )}
 
                <div className="space-y-4 pt-4">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-bold">II. Diagnóstico Inicial Técnico</p>
-                  <div className="bg-white p-6 rounded-2xl text-xs text-slate-600 leading-relaxed italic border border-slate-200 shadow-sm whitespace-pre-wrap">
-                    {clientData?.hojaServicio?.notasDiagnostico || "Cargando su diagnóstico personalizado..."}
+                  <div className="bg-white p-6 rounded-2xl text-xs text-slate-600 leading-relaxed border border-slate-200 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none"><FileText size={80} /></div>
+                    <div className="relative z-10 space-y-4">
+                       <p className="font-bold border-b pb-2 text-slate-900">PARA: {clientData?.nombre || '[NOMBRE]'} | CURP: {clientData?.curp || '[CURP]'} | RFC: {clientData?.rfc || '[RFC]'}</p>
+                       <div className="italic leading-relaxed whitespace-pre-wrap">
+                        {clientData?.hojaServicio?.notasDiagnostico || "Cargando su diagnóstico personalizado..."}
+                       </div>
+                    </div>
                   </div>
                </div>
             </div>
