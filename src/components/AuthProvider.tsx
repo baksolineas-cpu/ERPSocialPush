@@ -25,23 +25,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string) => {
     try {
-      // Usamos getGASData con la acción LOGIN que ahora devuelve el usuario directamente
-      // Esto evita problemas de CORS y latencia entre POST y GET
-      const response = await getGASData(`LOGIN&email=${encodeURIComponent(email)}`);
+      const cleanEmail = email.trim().toLowerCase();
+      // Usamos getGASData con la acción LOGIN pasando params correctamente
+      const response = await getGASData('LOGIN', { email: cleanEmail });
       
       if (response && response.success && response.user) {
-        const userData: User = response.user;
+        const userData: User = { 
+          email: response.user.email, 
+          rol: response.user.rol, 
+          nombre: response.user.nombre 
+        };
         setUser(userData);
         localStorage.setItem('bakso_user', JSON.stringify(userData));
         
-        // Registrar log de acceso (esto puede ser asíncrono)
-        callGAS('LOG_ACTION', { accion: 'LOGIN', detalles: `Usuario: ${email}` }, email).catch(console.error);
+        // Registrar log de acceso
+        callGAS('LOG_ACTION', { accion: 'LOGIN', detalles: `Usuario: ${cleanEmail}` }, cleanEmail).catch(console.error);
       } else {
-        alert(response?.error || "Usuario no autorizado en el sistema.");
+        alert(response?.error || `Usuario ${cleanEmail} no autorizado en la base de datos de Social Push`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error en login:", error);
-      alert("Error al validar usuario.");
+      alert(error?.message || "Error al validar usuario.");
     }
   };
 

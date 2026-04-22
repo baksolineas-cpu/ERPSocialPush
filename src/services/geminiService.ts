@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+const apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 /**
@@ -26,26 +26,68 @@ function jsonSanitizer(text: string): any {
  * OCR del Audit Digital - Extracción de datos maestros y complementarios.
  */
 export async function extractDocumentData(base64Image: string, mimeType: string, docType: string = 'CSF') {
-  if (!ai) throw new Error('CONFIG_ERROR: VITE_GEMINI_API_KEY no configurada');
+  if (!ai) throw new Error('CONFIG_ERROR: GEMINI_API_KEY no configurada');
   const cleanBase64 = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
   
-  let prompt = `Extrae de este ${docType}: nombre, curp, rfc, nss, semanas_cotizadas, salario_diario, domicilio. Devuelve SOLO JSON puro.`;
+  let promptText = `Actúa como un extractor de datos oficial de México. Analiza este documento (${docType}) y extrae la información en un objeto JSON puro.
+Usa EXACTAMENTE estas claves, si el dato no está presente asigna un string vacío "":
+- "nombre": Nombre completo de la persona.
+- "curp": CURP (18 caracteres).
+- "rfc": RFC con homoclave (13 caracteres).
+- "nss": Número de Seguridad Social (11 dígitos).
+- "semanasCotizadas": Número de semanas reconocidas.
+- "ultimoSalario": Salario base de cotización o diario.
+- "regimenFiscal": Régimen fiscal o tipo de contribuyente.
+- "domicilio": Domicilio completo o dirección.
+No inventes datos. Devuelve SOLO el bloque JSON validado.`;
   
   if (docType === 'COMPLEMENTARIO') {
-      prompt = `Analiza este documento complementario de Seguridad Social (México). 
-      1. Determina si es una 'Hoja Rosa' (evidencia de patrones antiguos) o una 'Resolución de Búsqueda de Semanas'. 
-      2. Si es Resolución, extrae el número de semanas dictaminadas.
-      Devuelve SOLO JSON con campos: tipo_complemento ('Hoja Rosa', 'Resolución', 'Ninguno'), semanas_extra (número), notas_auditoria (breve descripción técnica).`;
+      promptText = `Analiza este documento complementario de Seguridad Social (México). 
+      1. Determina si es una 'Hoja Rosa' o una 'Resolución de Búsqueda de Semanas'.
+      Devuelve SOLO JSON puro con llaves: "tipo_complemento" ('Hoja Rosa', 'Resolución', 'Ninguno'), "semanas_extra" (número), "notas_auditoria" (breve descripción técnica).`;
   }
 
-  const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-  const result = await model.generateContent([
-    prompt,
-    { inlineData: { data: cleanBase64, mimeType: mimeType || 'application/pdf' } }
-  ]);
+  let result;
+  try {
+    result = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: promptText },
+            { inlineData: { data: cleanBase64, mimeType: mimeType || 'application/pdf' } }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+      }
+    });
+  } catch (error: any) {
+    if (error?.status === 429 || error?.message?.includes("exceeded your current quota") || error?.message?.includes("RESOURCE_EXHAUSTED")) {
+      throw new Error("Cuota de IA excedida. Has alcanzado el límite del plan gratuito o facturación. Intenta más tarde.");
+    }
+    throw error;
+  }
   
-  const responseText = result.response.text();
-  return jsonSanitizer(responseText);
+  const parsed = jsonSanitizer(result.text || "{}");
+  
+  // Limpieza de números y formatos
+  const cleanNum = (v: any) => String(v || '').replace(/[^0-9]/g, '');
+
+  return {
+    nombre: String(parsed.nombre || '').trim().replace(/[\n\r]/g, ' '),
+    curp: String(parsed.curp || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, ''),
+    rfc: String(parsed.rfc || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, ''),
+    nss: cleanNum(parsed.nss),
+    semanasCotizadas: parseInt(cleanNum(parsed.semanasCotizadas)) || 0,
+    ultimoSalario: parseFloat(String(parsed.ultimoSalario || 0).replace(/[^0-9.]/g, '')) || 0,
+    regimenFiscal: String(parsed.regimenFiscal || '').trim(),
+    domicilio: String(parsed.domicilio || '').trim().replace(/[\n\r]/g, ' '),
+    tipo_complemento: parsed.tipo_complemento || 'Ninguno',
+    semanas_extra: parseInt(cleanNum(parsed.semanas_extra)) || 0
+  };
 }
 
 /**
@@ -55,18 +97,11 @@ export async function extractDocumentData(base64Image: string, mimeType: string,
 export async function getConsultorChatResponse(history: any[], context: any) {
   if (!ai) return "Error: La inteligencia artificial no está configurada.";
   
-  const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-  
   // Mapeo de historial para el formato del SDK
   const chatHistory = history.map(h => ({
     role: h.role === 'user' ? 'user' : 'model',
     parts: [{ text: h.parts[0].text }]
   }));
-
-  const chat = model.startChat({
-    history: chatHistory,
-    generationConfig: { maxOutputTokens: 1500, temperature: 0.7 }
-  });
 
   const systemPrompt = `
     Eres el Redactor Jurídico y Consultor Senior de Social Push®.
@@ -86,7 +121,19 @@ export async function getConsultorChatResponse(history: any[], context: any) {
     Usa un tono formal, ejecutivo y apegado a la Ley del Seguro Social (Ley 73).
   `;
 
-  // Se envía el prompt de sistema como instrucción de control sobre el último mensaje
-  const result = await chat.sendMessage(systemPrompt);
-  return result.response.text();
+  const chat = ai.chats.create({
+    model: "gemini-2.5-flash",
+    history: chatHistory,
+    config: { systemInstruction: systemPrompt, temperature: 0.7 }
+  });
+
+  try {
+    const result = await chat.sendMessage({ message: "Por favor, emite el diagnóstico." });
+    return result.text;
+  } catch (error: any) {
+    if (error?.status === 429 || error?.message?.includes("exceeded your current quota") || error?.message?.includes("RESOURCE_EXHAUSTED")) {
+      return "Hubo un error al generar el diagnóstico: Límite de Cuota de IA agotada. Por favor contacte con su administrador o revise la facturación.";
+    }
+    return `Error al generar el diagnóstico: ${error?.message || 'Error desconocido'}`;
+  }
 }

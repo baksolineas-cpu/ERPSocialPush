@@ -45,6 +45,10 @@ export async function getGASData(action: string = 'GET_ALL', params: any = {}) {
     params.t = Date.now();
     params.action = action;
     
+    if (action === 'LOGIN' && params.email) {
+      console.log('REQUIRIENDO LOGIN PARA:', params.email);
+    }
+    
     const queryParams = new URLSearchParams(params).toString();
     const url = `${GAS_URL}?${queryParams}`;
     console.log("FETCH (GET) URL:", url);
@@ -57,13 +61,23 @@ export async function getGASData(action: string = 'GET_ALL', params: any = {}) {
     });
     
     const text = await response.text();
-    const result = JSON.parse(text);
-    console.log("CONEXIÓN EXITOSA CON GAS (GET):", result);
+    console.log('RESPUESTA SERVIDOR:', text);
     
-    return result;
+    try {
+      const result = JSON.parse(text);
+      if (result.message === "API BAKSO Activa" && action === "LOGIN") {
+         throw new Error('Error de Sincronización: El script de Google no ha sido actualizado con la función de Login');
+      }
+      console.log("CONEXIÓN EXITOSA CON GAS (GET):", result);
+      return result;
+    } catch (parseError: any) {
+      if (parseError.message.includes('Error de Sincronización')) throw parseError;
+      console.error("Error de Formato (JSON Parse):", text);
+      throw new Error('Error de Formato: El servidor devolvió texto en lugar de datos');
+    }
   } catch (error) {
     console.error("Error en getGASData:", error);
-    return null;
+    throw error;
   }
 }
 

@@ -23,6 +23,10 @@ function doPost(e) {
       return handleUploadFile(payload);
     } else if (action === 'GET_DATA') {
       return handleGetData(payload.sheetName);
+    } else if (action === 'LOGIN') {
+      return handleLogin(payload.email || payload);
+    } else if (action === 'LOG_ACTION') {
+      return handleLogAction(payload, data.userEmail);
     } else {
       return createResponse({ error: 'Acción no válida: ' + action }, 400);
     }
@@ -34,6 +38,9 @@ function doPost(e) {
 
 function doGet(e) {
   const action = e.parameter.action;
+  if (action === 'LOGIN') {
+    return handleLogin(e.parameter.email);
+  }
   if (action === 'GET_CLIENTE_STATUS') {
     const curp = e.parameter.curp;
     if (!curp) return createResponse({ status: 'error' }, 400);
@@ -192,6 +199,76 @@ function getSheetData(name) {
     });
     return obj;
   });
+}
+
+function handleLogin(incomingEmail) {
+  if (!incomingEmail) return createResponse({ success: false, error: 'Email requerido' }, 400);
+
+  const cleanIncomingEmail = incomingEmail.toString().replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase();
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("USUARIOS");
+  
+  if (!sheet) {
+    sheet = ss.insertSheet("USUARIOS");
+    sheet.appendRow(["Email", "Rol", "Nombre"]);
+  }
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return createResponse({ success: false, error: 'No hay usuarios autorizados' }, 404);
+
+  const headers = values[0].map(h => h.toString().toLowerCase().trim());
+  const emailCol = headers.indexOf('email');
+  const rolCol = headers.indexOf('rol');
+  const nombreCol = headers.indexOf('nombre');
+
+  if (emailCol === -1) return createResponse({ success: false, error: 'Columna email no encontrada' }, 500);
+
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const sheetEmail = row[emailCol] ? row[emailCol].toString().replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase() : "";
+    if (sheetEmail === cleanIncomingEmail) {
+      
+      // REGISTRO DE LOGS ESTRICTO
+      let logSheet = ss.getSheetByName("LOGS");
+      if (!logSheet) {
+        logSheet = ss.insertSheet("LOGS");
+        logSheet.appendRow(["FechaHora", "Usuario", "Accion", "Detalles"]);
+      }
+      const fechaExacta = new Date();
+      logSheet.appendRow([fechaExacta, cleanIncomingEmail, "LOGIN EXITOSO", `Acceso autorizado (Rol: ${rolCol > -1 ? row[rolCol] : "ASESOR"})`]);
+
+      return createResponse({
+        success: true,
+        user: {
+          email: sheetEmail,
+          rol: rolCol > -1 ? row[rolCol].toString().trim() : "ASESOR",
+          nombre: nombreCol > -1 ? row[nombreCol].toString().trim() : sheetEmail
+        }
+      });
+    }
+  }
+
+  // Si falló, registrar fallo también
+  let logSheet = ss.getSheetByName("LOGS");
+  if (!logSheet) {
+    logSheet = ss.insertSheet("LOGS");
+    logSheet.appendRow(["FechaHora", "Usuario", "Accion", "Detalles"]);
+  }
+  logSheet.appendRow([new Date(), cleanIncomingEmail, "LOGIN FALLIDO", "Usuario no encontrado en BBDD"]);
+
+  return createResponse({ success: false, error: `Usuario ${cleanIncomingEmail} no autorizado en la base de datos de Social Push` }, 401);
+}
+
+function handleLogAction(payload, email) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let logSheet = ss.getSheetByName("LOGS");
+  if (!logSheet) {
+    logSheet = ss.insertSheet("LOGS");
+    logSheet.appendRow(["FechaHora", "Usuario", "Accion", "Detalles"]);
+  }
+  logSheet.appendRow([new Date(), email || "Desconocido", payload.accion || "INFO", payload.detalles || ""]);
+  return createResponse({ success: true });
 }
 
 function createResponse(data, code = 200) {

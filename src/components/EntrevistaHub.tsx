@@ -15,7 +15,7 @@ import { extractDocumentData, getConsultorChatResponse } from '@/services/gemini
 import { Cliente } from '@/types';
 
   // --- SUB-COMPONENTE: INPUT DE AUDITORÍA PREMIUM ---
-  function AuditoriaInput({ label, value, isLoading, isLocked, onUnlock, onChange, hasAlert, fieldKey }: any) {
+  function AuditoriaInput({ label, value, isLoading, isLocked, onUnlock, onChange, hasAlert, fieldKey, registrarAccion }: any) {
     return (
       <div className="space-y-1.5 group">
         <div className="flex justify-between items-center px-1">
@@ -182,31 +182,54 @@ export default function EntrevistaHub() {
         const extracted = await extractDocumentData(base64, file.type, type.toUpperCase());
         const updatePayload: any = { expedienteExistingFiles: { ...data.expedienteExistingFiles, [type]: true } };
 
-        if (type === 'domicilio') {
-           updatePayload.domicilio = extracted.domicilio || data.domicilio;
-        } else {
-           updatePayload.nombre = extracted.nombre || data.nombre;
-           updatePayload.curp = extracted.curp || data.curp;
-           updatePayload.rfc = extracted.rfc || data.rfc;
-           updatePayload.nss = extracted.nss || data.nss;
-           updatePayload.semanasCotizadas = extracted.semanasCotizadas || data.semanasCotizadas;
-           updatePayload.ultimoSalario = extracted.ultimoSalario || data.ultimoSalario;
-           updatePayload.regimenFiscal = extracted.regimenFiscal || data.regimenFiscal;
-        }
+        // Mapeo Inteligente Basado en el Tipo de Documento Oficial
+        const newLocked = new Set(lockedFields);
 
-        if (type === 'complementario') {
+        if (type === 'ine') {
+          if (extracted.nombre) { updatePayload.nombre = extracted.nombre; newLocked.add('nombre'); }
+          if (extracted.curp && extracted.curp.length === 18) { updatePayload.curp = extracted.curp; newLocked.add('curp'); }
+          if (extracted.domicilio) { updatePayload.domicilio = extracted.domicilio; newLocked.add('domicilio'); }
+          registrarAccion(`Identidad (INE) procesada vía OCR.`);
+        } else if (type === 'csf') {
+          if (extracted.rfc) { updatePayload.rfc = extracted.rfc; newLocked.add('rfc'); }
+          if (extracted.curp && extracted.curp.length === 18) { updatePayload.curp = extracted.curp; newLocked.add('curp'); }
+          if (extracted.nombre && !data.nombre) { updatePayload.nombre = extracted.nombre; newLocked.add('nombre'); }
+          if (extracted.regimenFiscal) { updatePayload.regimenFiscal = extracted.regimenFiscal; newLocked.add('regimenFiscal'); }
+          registrarAccion(`Constancia Fiscal procesada vía OCR.`);
+        } else if (type === 'semanas') {
+          if (extracted.nss) { updatePayload.nss = extracted.nss; newLocked.add('nss'); }
+          if (extracted.semanasCotizadas > 0) { updatePayload.semanasCotizadas = extracted.semanasCotizadas; newLocked.add('semanasCotizadas'); }
+          if (extracted.ultimoSalario > 0) { updatePayload.ultimoSalario = extracted.ultimoSalario; newLocked.add('ultimoSalario'); }
+          registrarAccion(`Reporte de Semanas procesado vía OCR.`);
+        } else if (type === 'domicilio') {
+          if (extracted.domicilio) { updatePayload.domicilio = extracted.domicilio; newLocked.add('domicilio'); }
+          registrarAccion(`Domicilio extraído. Identidad protegida (nombre de tercero ignorado).`);
+        } else if (type === 'complementario') {
           const nuevasAlertas = [...((data.metadatosAuditoria as any)?.alertas || [])];
           if (extracted.tipo_complemento === 'Hoja Rosa') {
-            nuevasAlertas.push('💡 Evidencia detectada: Este documento puede sustentar un Trámite de Búsqueda de Semanas Manual para incrementar la cuantía');
+            nuevasAlertas.push('💡 Evidencia detectada: Este documento puede sustentar un Trámite de Búsqueda de Semanas Manual.');
           }
           updatePayload.metadatosAuditoria = { ...data.metadatosAuditoria, alertas: nuevasAlertas } as any;
-          if (extracted.tipo_complemento === 'Resolución') updatePayload.semanasExtra = extracted.semanas_extra || 0;
+          if (extracted.tipo_complemento === 'Resolución' && extracted.semanas_extra > 0) {
+            updatePayload.semanasExtra = extracted.semanas_extra;
+            newLocked.add('semanasExtra');
+          }
+          registrarAccion(`Doc Complementario procesado: ${extracted.tipo_complemento}`);
+        } else {
+          // Fallback para otros documentos
+           Object.assign(updatePayload, extracted);
+           registrarAccion(`Archivo ${type.toUpperCase()} cargado y validado vía OCR.`);
         }
+        
+        setLockedFields(newLocked);
         updateData(updatePayload);
-        registrarAccion(`Archivo ${type.toUpperCase()} cargado y validado vía OCR.`);
-      } catch (ocrError) {
+      } catch (ocrError: any) {
+        console.error("OCR Process Failed:", ocrError);
         updateData({ expedienteExistingFiles: { ...data.expedienteExistingFiles, [type]: true } });
-        registrarAccion(`Archivo ${type.toUpperCase()} cargado (fallo OCR).`);
+        if (ocrError?.message && ocrError.message.includes("Cuota de IA excedida")) {
+           alert("Alerta: Se ha excedido la cuota de la Inteligencia Artificial. El documento se cargará pero sus datos no podrán extraerse automáticamente. Por favor, llena los campos a mano.");
+        }
+        registrarAccion(`Archivo ${type.toUpperCase()} cargado (fallo OCR: ${ocrError?.message || 'Error desconocido'}).`);
       }
 
       if (data.id?.startsWith('NEW_')) {
@@ -223,21 +246,34 @@ export default function EntrevistaHub() {
 
   const handleSiguientePasoDocs = async () => {
     if (data.id?.startsWith('NEW_')) {
-      if (!data.nombre || !data.curp || data.curp.length !== 18) { alert("La CURP debe tener 18 caracteres."); return; }
+      if (!data.nombre || !data.curp || data.curp.length !== 18) { alert("La CURP de 18 caracteres y Nombre son obligatorios."); return; }
       setIsProcessing(true);
       try {
         const curp10 = data.curp.substring(0, 10).toUpperCase();
-        const res = await callGAS('CREATE_CLIENTE', { ...data, id: curp10 });
-        if (res?.success) {
+        // Garantizar payload de 22 campos 
+        const payloadCompleto = {
+          ...data,
+          id: curp10,
+          curp: data.curp.toUpperCase()
+        };
+        const res = await callGAS('CREATE_CLIENTE', payloadCompleto);
+        
+        if (res?.success || res?.id_carpeta_drive) {
+          const idCarpetaDrive = res.id_carpeta_drive || res.idcarpetadrive;
           if (Object.keys(pendingUploads).length > 0) {
             await Promise.all(Object.entries(pendingUploads).map(([type, base64]) => 
-              callGAS('UPLOAD_FILE', { fileName: `${type.toUpperCase()}_${curp10}.pdf`, fileData: base64, id_carpeta_drive: res.id_carpeta_drive })
+              callGAS('UPLOAD_FILE', { fileName: `${type.toUpperCase()}_${curp10}.pdf`, fileData: base64, id_carpeta_drive: idCarpetaDrive })
             ));
             setPendingUploads({});
           }
-          updateData({ id: curp10, id_carpeta_drive: res.id_carpeta_drive });
+          updateData({ id: curp10, id_carpeta_drive: idCarpetaDrive });
           setActiveStep(3);
+        } else {
+           alert(res?.error || "Hubo un problema al crear el expediente. Intenta de nuevo.");
         }
+      } catch (err: any) {
+         console.error(err);
+         alert("Error de conexión al crear expediente.");
       } finally { setIsProcessing(false); }
     } else {
       setActiveStep(3);
@@ -250,13 +286,34 @@ export default function EntrevistaHub() {
       const promptText = `Basado en estas intenciones y necesidades que el asesor detectó: ${iaContext}, y los datos técnicos del caso: Semanas IMSS=${data.semanasCotizadas}, Edad=${calculateDetailedAge(data.curp || '').years}, Salario=${data.ultimoSalario}, redacta un diagnóstico inicial profesional dirigido al cliente.`;
       const draft = await getConsultorChatResponse([{ role: 'user', parts: [{ text: promptText }] }], data);
       setHojaServicio(prev => ({ ...prev, notasDiagnostico: draft }));
+    } catch (error: any) {
+      alert(`Error de IA: ${error.message || 'Desconocido'}`);
     } finally { setIsAiDrafting(false); }
   };
 
-  const handleFinalizarCertificacion = async () => {
+  const handleSiguientePasoDictamen = () => {
+    if (hojaServicio.servicios.length === 0 && !hojaServicio.otroServicioTexto) {
+      alert("Debes seleccionar o especificar al menos un servicio.");
+      return;
+    }
+    if (!hojaServicio.notasDiagnostico.trim()) {
+      alert("El diagnóstico no puede estar vacío.");
+      return;
+    }
+    setActiveStep(4);
+  };
+
+  const handleFinalizarCertificacion = async (method: 'whatsapp' | 'email') => {
     if (!asesorNombre || sigCanvasAsesor.current?.isEmpty()) {
       alert("El asesor debe firmar la hoja de diagnóstico antes de enviarla."); return;
     }
+    
+    // Open window synchronously to bypass popup blockers on mobile/safari
+    let popupWindow: Window | null = null;
+    if (method === 'whatsapp') {
+      popupWindow = window.open('about:blank', '_blank');
+    }
+    
     setIsProcessing(true);
     const firmaAsesor = sigCanvasAsesor.current?.getTrimmedCanvas().toDataURL('image/png');
     const serviciosFinales = [...hojaServicio.servicios];
@@ -272,7 +329,26 @@ export default function EntrevistaHub() {
         monto: hojaServicio.honorariosAcordados,
         auditLog: JSON.stringify(auditLog)
       });
-      if (res?.success) setActiveStep(4);
+      if (res?.success) {
+         // Ya está guardado, abrimos el método de envío
+         const tipoDoc = !!data.contratourl ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
+         const link = `${window.location.origin}/firma-externa/${data.id}?tipoDoc=${tipoDoc}`;
+         if (method === 'whatsapp') {
+            const mensaje = tipoDoc === 'CONTRATO_Y_DIAGNOSTICO' ? "Formaliza tu Contrato y Diagnóstico Inicial de SOCIAL PUSH aquí: " : "Formaliza tu Diagnóstico Inicial de SOCIAL PUSH aquí: ";
+            const url = `https://wa.me/52${(data.whatsapp || '').replace(/\D/g, '')}?text=${encodeURIComponent(mensaje + link)}`;
+            if (popupWindow) popupWindow.location.href = url;
+         } else {
+            const asunto = tipoDoc === 'CONTRATO_Y_DIAGNOSTICO' ? "Firma de Contrato y Diagnóstico" : "Firma de Diagnóstico";
+            window.location.href = `mailto:${data.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent("Ingresa aquí: " + link)}`;
+         }
+         alert("Expediente Certificado Guardado Exitosamente.");
+      } else {
+         if (popupWindow) popupWindow.close();
+         alert("La certificación falló. Inténtalo de nuevo.");
+      }
+    } catch (e) {
+      if (popupWindow) popupWindow.close();
+      alert("Error al finalizar: " + e);
     } finally { setIsProcessing(false); }
   };
 
@@ -289,7 +365,8 @@ export default function EntrevistaHub() {
         {data.id && <button onClick={() => {if(confirm("¿Cerrar caso?")) window.location.reload();}} className="px-5 py-2 bg-white/10 text-white rounded-lg text-[10px] font-black uppercase">Cerrar Caso</button>}
       </header>
 
-      <main className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full">
+      <div className={cn("flex-1 w-full mx-auto flex items-start", activeStep > 1 ? "max-w-[1600px] gap-8 px-6 lg:px-8 py-6" : "max-w-7xl")}>
+        <main className={cn("flex-1 w-full min-w-0 origin-top", activeStep <= 1 && "p-6 md:p-8")}>
         {activeStep === 1 && (
           <div className="max-w-4xl mx-auto space-y-10 py-10">
             <div className="bg-white p-10 rounded-[48px] shadow-2xl border border-slate-100 space-y-8">
@@ -394,7 +471,7 @@ export default function EntrevistaHub() {
                         <textarea value={hojaServicio.notasDiagnostico} onChange={(e) => setHojaServicio({...hojaServicio, notasDiagnostico: e.target.value})} className="flex-1 w-full bg-slate-800 text-emerald-50 border border-slate-700 rounded-2xl p-4 text-sm font-medium leading-relaxed outline-none focus:border-emerald-500 resize-none custom-scrollbar" placeholder="El dictamen técnico final aparecerá aquí..."/>
                     </div>
                 </div>
-                <button onClick={handleFinalizarCertificacion} className="w-full py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl flex items-center justify-center gap-3">Certificar Diagnóstico Inicial <ArrowRight /></button>
+                <button onClick={handleSiguientePasoDictamen} className="w-full py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl flex items-center justify-center gap-3">Previsualizar y Sellar Diagnóstico <ArrowRight /></button>
             </div>
         )}
 
@@ -402,7 +479,7 @@ export default function EntrevistaHub() {
             <div className="bg-white p-12 rounded-[48px] shadow-2xl border border-slate-100 space-y-10 animate-in slide-in-from-bottom">
                 <div className="text-center space-y-4">
                     <div className="bg-[#DAA520]/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-inner"><FileSignature size={48} className="text-[#DAA520]" /></div>
-                    <h4 className="text-4xl font-black uppercase text-[#003366] tracking-tighter">3. Hoja de Diagnóstico y Servicios</h4>
+                    <h4 className="text-4xl font-black uppercase text-[#003366] tracking-tighter">3. Sanción y Envío Externa</h4>
                 </div>
 
                 <div className="bg-slate-900 text-white p-8 rounded-[32px] shadow-xl flex items-center justify-between">
@@ -422,6 +499,13 @@ export default function EntrevistaHub() {
                   </div>
                 </div>
 
+                {/* ADVERTENCIA DE VALIDACION ANTES DE SELLAR */}
+                {Object.keys(data.expedienteExistingFiles || {}).length < 2 && (
+                   <div className="p-4 bg-orange-50 border border-orange-200 rounded-2xl text-orange-600 font-bold text-xs flex items-center gap-3">
+                      <AlertTriangle size={16} /> <span>Estás a punto de certificar un expediente con expedientes sin verificar. El sello del Asesor asume responsabilidad.</span>
+                   </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t border-slate-100 pt-10">
                    <div className="space-y-4">
                       <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Sello de Responsabilidad (Asesor)</label>
@@ -433,17 +517,14 @@ export default function EntrevistaHub() {
                    </div>
                    <div className="space-y-4 flex flex-col justify-center">
                       <div className={cn("p-6 rounded-3xl border text-center space-y-6 transition-all", asesorNombre ? "bg-white" : "bg-slate-50 opacity-50")}>
-                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Enviar Firma Externa (Cliente)</p>
+                         <p className="text-[9px] font-black text-[#003366] uppercase tracking-widest">Sellar Expediente y Enviar Firma Externa (Cliente)</p>
                          <div className="flex gap-2">
-                            <button type="button" disabled={!asesorNombre} onClick={() => {
-                                const tipoDoc = !!data.contratourl ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
-                                const link = `${window.location.origin}/firma/${data.id}?tipoDoc=${tipoDoc}`;
-                                window.open(`https://wa.me/52${data.whatsapp?.replace(/\D/g, '')}?text=${encodeURIComponent("Formaliza tu Diagnóstico Inicial de SOCIAL PUSH aquí: " + link)}`, '_blank');
-                            }} className="flex-1 py-5 bg-[#25D366] text-white rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] transition-all">WhatsApp <Smartphone size={16}/></button>
-                            <button type="button" disabled={!asesorNombre} onClick={() => {
-                                const link = `${window.location.origin}/firma/${data.id}?tipoDoc=${data.contratourl ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO'}`;
-                                window.location.href = `mailto:${data.email}?subject=Firma de Diagnóstico&body=Ingresa aquí: ${link}`;
-                            }} className="flex-1 py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] transition-all">Email <Mail size={16}/></button>
+                             <button type="button" disabled={isProcessing} onClick={() => handleFinalizarCertificacion('whatsapp')} className="flex-1 py-5 bg-[#25D366] text-white rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex justify-center items-center gap-2">
+                               {isProcessing ? <Loader2 size={16} className="animate-spin" /> : "WhatsApp"} <Smartphone size={16}/>
+                             </button>
+                             <button type="button" disabled={isProcessing} onClick={() => handleFinalizarCertificacion('email')} className="flex-1 py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex justify-center items-center gap-2">
+                               {isProcessing ? <Loader2 size={16} className="animate-spin" /> : "Email"} <Mail size={16}/>
+                             </button>
                          </div>
                       </div>
                    </div>
@@ -454,9 +535,24 @@ export default function EntrevistaHub() {
 
       {/* PANEL DERECHO (AUDITORÍA) */}
       {activeStep > 1 && (
-        <aside className="fixed right-8 top-28 w-80 bg-[#003366] p-8 rounded-[48px] text-white shadow-2xl space-y-8 hidden xl:block">
+        <aside className="sticky top-28 w-80 xl:w-96 h-[calc(100vh-140px)] flex-shrink-0 bg-[#003366] p-8 pb-8 rounded-[48px] text-white shadow-2xl space-y-8 hidden xl:flex flex-col overflow-y-auto custom-scrollbar">
             <div className="flex items-center gap-3 border-b border-white/10 pb-4"><Activity size={24} className="text-[#DAA520]" /><h4 className="text-lg font-black uppercase tracking-tighter">Panel de Auditoría</h4></div>
+            
             <div className="space-y-5">
+                {/* Nivel de Certeza Jurídica (Al inicio, como solicitado) */}
+                <div className={cn("p-4 rounded-2xl flex items-center gap-3 border shadow-lg", nivelCerteza === 'Alto' ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-amber-500/10 border-amber-500/30 text-amber-500")}>
+                  {nivelCerteza === 'Alto' ? <ShieldCheck size={20} /> : <AlertTriangle size={20} />}
+                  <span className="text-[10px] font-black uppercase tracking-widest">{nivelCerteza === 'Alto' ? 'Certeza Jurídica: Alta. Match total entre CSF y Reporte de Semanas.' : `Certeza: Baja. Faltan documentos oficiales.`}</span>
+                </div>
+
+                {/* Badge 6+1 Visible de Inmediato si aplica */}
+                {detailedAge?.hasRoundingBenefit && (
+                    <div className="bg-[#DAA520]/20 border border-[#DAA520]/60 p-4 rounded-2xl flex items-center justify-between shadow-lg animate-pulse">
+                        <div className="flex items-center gap-2"><Sparkles className="text-[#DAA520]" size={16} /><span className="text-[9px] font-black text-[#DAA520] uppercase tracking-widest">Incentivo 6+1</span></div>
+                        <span className="bg-[#DAA520] text-[#003366] text-[9px] font-black px-2 py-0.5 rounded-full">Redondeo Aplicable</span>
+                    </div>
+                )}
+
                 <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-3">
                     <h5 className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1">Resumen de Materialidad</h5>
                     <div className="flex flex-col gap-2 text-[10px] font-bold">
@@ -465,11 +561,6 @@ export default function EntrevistaHub() {
                     </div>
                 </div>
 
-                <div className={cn("p-4 rounded-2xl flex items-center gap-3 border", nivelCerteza === 'Alto' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-amber-500/10 border-amber-500/20 text-amber-400")}>
-                  {nivelCerteza === 'Alto' ? <ShieldCheck size={20} /> : <AlertTriangle size={20} />}
-                  <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">{nivelCerteza === 'Alto' ? 'Certeza Jurídica: Alta. Match total entre CSF y Reporte de Semanas. Datos oficiales vinculados.' : `Certeza Jurídica: Baja. Razones: ${(data.metadatosAuditoria as any)?.discrepancias?.join('. ') || 'Sin especificar razones detalladas.'}`}</span>
-                </div>
-                
                 {data.metadatosAuditoria?.alertas?.map((alerta: string, i: number) => (
                     <div key={i} className="bg-amber-500/10 p-3 rounded-xl text-[9px] font-bold text-amber-500 flex items-center gap-2 border border-amber-500/10"><AlertCircle size={14}/> {alerta}</div>
                 ))}
@@ -481,35 +572,33 @@ export default function EntrevistaHub() {
                     </div>
                 </div>
 
-                <AuditoriaInput label="Nombre del Cliente" value={data.nombre} fieldKey="nombre" isLoading={analyzingCount > 0 && !data.nombre} onChange={(v:any)=>updateData({nombre:v})} />
-                <AuditoriaInput label="CURP Oficial" value={data.curp} fieldKey="curp" isLoading={analyzingCount > 0 && !data.curp} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
-                <AuditoriaInput label="RFC Fiscal" value={data.rfc} fieldKey="rfc" isLoading={analyzingCount > 0 && !data.rfc} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
-                <AuditoriaInput label="Semanas Extra" value={data.semanasExtra} fieldKey="semanasExtra" onChange={(v:any)=>updateData({semanasExtra: v})} />
-                <AuditoriaInput label="NSS IMSS" value={data.nss} fieldKey="nss" isLoading={analyzingCount > 0 && !data.nss} onChange={(v:any)=>updateData({nss:v})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="Nombre del Cliente" value={data.nombre} fieldKey="nombre" isLocked={lockedFields.has('nombre')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nombre'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nombre} onChange={(v:any)=>updateData({nombre:v})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="CURP Oficial" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="RFC Fiscal" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="Semanas Extra" value={data.semanasExtra} fieldKey="semanasExtra" isLocked={lockedFields.has('semanasExtra')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasExtra'); setLockedFields(s); }} onChange={(v:any)=>updateData({semanasExtra: v})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="NSS IMSS" value={data.nss} fieldKey="nss" isLocked={lockedFields.has('nss')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nss'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nss} onChange={(v:any)=>updateData({nss:v})} />
                 
-                <div className="grid grid-cols-2 gap-3">
-                    <AuditoriaInput label="Semanas IMSS" value={data.semanasCotizadas} fieldKey="semanasCotizadas" isLoading={analyzingCount > 0 && !data.semanasCotizadas} onChange={(v:any)=>updateData({semanasCotizadas:v})} />
-                    <AuditoriaInput label="Último Salario" value={data.ultimoSalario} fieldKey="ultimoSalario" isLoading={analyzingCount > 0 && !data.ultimoSalario} onChange={(v:any)=>updateData({ultimoSalario:v})} />
+                <div className="grid grid-cols-2 gap-4">
+                    <AuditoriaInput registrarAccion={registrarAccion} label="Semanas IMSS" value={data.semanasCotizadas} fieldKey="semanasCotizadas" isLocked={lockedFields.has('semanasCotizadas')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasCotizadas'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.semanasCotizadas} onChange={(v:any)=>updateData({semanasCotizadas:v})} />
+                    <AuditoriaInput registrarAccion={registrarAccion} label="Último Salario" value={data.ultimoSalario} fieldKey="ultimoSalario" isLocked={lockedFields.has('ultimoSalario')} onUnlock={() => { const s = new Set(lockedFields); s.delete('ultimoSalario'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.ultimoSalario} onChange={(v:any)=>updateData({ultimoSalario:v})} />
                 </div>
-                <AuditoriaInput label="WhatsApp" value={data.whatsapp} fieldKey="whatsapp" onChange={(v:any)=>updateData({whatsapp:v})} />
-                <AuditoriaInput label="Email de Contacto" value={data.email} fieldKey="email" onChange={(v:any)=>updateData({email:v})} />
-                <AuditoriaInput label="Régimen Fiscal" value={data.regimenFiscal} fieldKey="regimenFiscal" onChange={(v:any)=>updateData({regimenFiscal:v})} />
-                
-                {detailedAge?.hasRoundingBenefit && (
-                    <div className="bg-[#DAA520]/20 border border-[#DAA520]/40 p-4 rounded-2xl flex items-center justify-between mb-4 animate-pulse">
-                        <div className="flex items-center gap-2"><Sparkles className="text-[#DAA520]" size={16} /><span className="text-[9px] font-black text-[#DAA520] uppercase tracking-widest">Incentivo 6+1</span></div>
-                        <span className="bg-[#DAA520] text-[#003366] text-[9px] font-black px-2 py-0.5 rounded-full">Redondeo Aplicable</span>
-                    </div>
-                )}
+                <AuditoriaInput registrarAccion={registrarAccion} label="WhatsApp" value={data.whatsapp} fieldKey="whatsapp" isLocked={lockedFields.has('whatsapp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('whatsapp'); setLockedFields(s); }} onChange={(v:any)=>updateData({whatsapp:v})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="Email de Contacto" value={data.email} fieldKey="email" isLocked={lockedFields.has('email')} onUnlock={() => { const s = new Set(lockedFields); s.delete('email'); setLockedFields(s); }} onChange={(v:any)=>updateData({email:v})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="Régimen Fiscal" value={data.regimenFiscal} fieldKey="regimenFiscal" isLocked={lockedFields.has('regimenFiscal')} onUnlock={() => { const s = new Set(lockedFields); s.delete('regimenFiscal'); setLockedFields(s); }} onChange={(v:any)=>updateData({regimenFiscal:v})} />
             </div>
+            
+            {/* Control Flotante Inferior fijo dentro del aside */}
             {activeStep === 2 && (
-                <button type="button" onClick={handleSiguientePasoDocs} disabled={isProcessing} className="w-full py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl hover:bg-[#c9961d] active:scale-95 transition-all flex items-center justify-center gap-3">
-                    {isProcessing ? <Loader2 size={18} className="animate-spin" /> : null}
-                    {data.id?.startsWith('NEW_') ? "Crear Expediente" : "Siguiente Paso"} <ArrowRight size={18} />
-                </button>
+               <div className="sticky bottom-0 bg-[#003366] pt-4 border-t border-white/10 mt-auto">
+                  <button type="button" onClick={handleSiguientePasoDocs} disabled={isProcessing} className="w-full py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl hover:bg-[#c9961d] active:scale-95 transition-all flex items-center justify-center gap-3">
+                      {isProcessing ? <Loader2 size={18} className="animate-spin" /> : null}
+                      {data.id?.startsWith('NEW_') ? "Crear Expediente" : "Siguiente Paso"} <ArrowRight size={18} />
+                  </button>
+               </div>
             )}
         </aside>
       )}
+      </div>
 
       {/* OVERLAY DE ÉXITO */}
       <AnimatePresence>
