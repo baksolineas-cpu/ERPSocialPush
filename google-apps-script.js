@@ -1,16 +1,23 @@
 const SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
 const ROOT_FOLDER_ID = "1xzILR2Afad-feJ-CHAkNiCHjHwLocvhX"; 
 
+function logDebug(tag, message) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName("DEBUG") || ss.insertSheet("DEBUG");
+    sheet.appendRow([new Date(), tag, message]);
+  } catch(e) {
+    Logger.log("Error logging to debug: " + e.toString());
+  }
+}
+
 function doPost(e) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let debugSheet = ss.getSheetByName("DEBUG") || ss.insertSheet("DEBUG");
-  
   try {
     const data = JSON.parse(e.postData.contents);
     const action = data.action || (data.payload && data.payload.action);
     const payload = data.payload || data; 
     
-    debugSheet.appendRow([new Date(), "POST Action: " + action, JSON.stringify(payload).substring(0, 500)]);
+    logDebug("POST Action: " + action, JSON.stringify(payload).substring(0, 500));
 
     if (action === 'CREATE_CLIENTE') {
       return handleCreateCliente(payload);
@@ -30,11 +37,13 @@ function doPost(e) {
       return handleFinalizeAudit(payload);
     } else if (action === 'UPDATE_CLIENTE_SIGNATURE') {
       return handleUpdateSignature(payload);
+    } else if (action === 'GET_CLIENTE_STATUS') {
+      return handleGetClienteStatus(payload);
     } else {
       return createResponse({ error: 'Acción no válida: ' + action }, 400);
     }
   } catch (error) {
-    debugSheet.appendRow([new Date(), "❌ ERROR POST", error.toString()]);
+    logDebug("❌ ERROR POST", error.toString());
     return createResponse({ error: error.toString() }, 500);
   }
 }
@@ -82,9 +91,88 @@ function handleUpdateSignature(payload) {
   }
 
   // 2. Actualizar estatus en Excel
-  sheet.getRange(rowIndex + 1, estatusCol + 1).setValue("FIRMADO");
+  sheet.getRange(rowIndex + 1, estatusCol + 1).setValue("COMPLETADO");
+
+  // 3. SELLAR DOCUMENTOS CON FIRMA Y SELFIE
+  const signedDocUrls = [];
+  if (folderId) {
+    try {
+      const folder = DriveApp.getFolderById(folderId);
+      const files = folder.getFiles();
+      while (files.hasNext()) {
+        const file = files.next();
+        const fileName = file.getName();
+        
+        // Buscamos docs para estampar firma (Contrato o Diagnóstico)
+        if (fileName.includes("CONTRATO_PERSONALIZADO") || fileName.includes("DIAGNOSTICO_CERTIFICADO")) {
+           const doc = DocumentApp.openById(file.getId());
+           const body = doc.getBody();
+           
+           // Añadir firma y selfie al final de forma estética
+           body.appendPageBreak();
+           const table = body.appendTable();
+           const row = table.appendTableRow();
+           
+           if (payload.selfieBase64) {
+             const selfieBlob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg");
+             const cell = row.appendTableCell("EVIDENCIA BIOMÉTRICA (SELFIE)\n");
+             cell.appendImage(selfieBlob).setWidth(150).setHeight(150);
+           }
+           
+           if (payload.firmaBase64) {
+             const firmaBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png");
+             const cell = row.appendTableCell("CONSENTIMIENTO DIGITAL (FIRMA)\n");
+             cell.appendImage(firmaBlob).setWidth(200).setHeight(100);
+           }
+           
+           table.setBorderWidth(0);
+           doc.saveAndClose();
+        
+        // Aplicamos restricción de solo lectura
+        if (typeof Drive !== 'undefined') {
+          try {
+            Drive.Files.update({
+              contentRestrictions: [{ readOnly: true, reason: 'Finalized contract.' }]
+            }, copy.getId());
+          } catch(e) { logDebug("LOCK_ERR", e.toString()); }
+        }
+           
+           // Convertir a PDF y guardar
+           const pdfBlob = file.getAs('application/pdf');
+           const pdfFile = folder.createFile(pdfBlob).setName(fileName + ".pdf");
+           pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+           signedDocUrls.push(pdfFile.getUrl());
+        }
+      }
+      
+      // 4. NOTIFICACIÓN POR CORREO AL CLIENTE (Si existe email)
+      const dataObj = getSheetData("CLIENTES")[rowIndex - 1];
+      const customerEmail = dataObj.email;
+      if (customerEmail && customerEmail.includes("@")) {
+         const pdfFiles = folder.getFilesByType(MimeType.PDF);
+         const attachments = [];
+         while (pdfFiles.hasNext()) {
+           const f = pdfFiles.next();
+           if (f.getName().includes("CONTRATO_PERSONALIZADO") || f.getName().includes("DIAGNOSTICO_CERTIFICADO")) {
+             attachments.push(f.getBlob());
+           }
+         }
+         
+         if (attachments.length > 0) {
+           MailApp.sendEmail({
+             to: customerEmail,
+             subject: "Expediente Digital Formalizado - Social Push®",
+             body: `Hola ${dataObj.nombre},\n\nTu expediente digital ha sido formalizado con éxito. Adjuntamos tu Contrato Marco y Certificación de Diagnóstico en formato PDF.\n\nGracias por confiar en Social Push®.`,
+             attachments: attachments
+           });
+         }
+      }
+    } catch (e) {
+      logDebug("❌ ERROR SELLANDO O ENVIANDO DOCS", e.toString());
+    }
+  }
   
-  return createResponse({ success: true });
+  return createResponse({ success: true, signedDocUrls });
 }
 
 /**
@@ -129,28 +217,113 @@ function handleFinalizeAudit(payload) {
        
        doc.saveAndClose();
        copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+       // 4. GENERACIÓN DE DIAGNÓSTICO CERTIFICADO
+       const diagDoc = DocumentApp.create(`DIAGNOSTICO_CERTIFICADO_${payload.curp || payload.id}`);
+       const diagBody = diagDoc.getBody();
+
+       diagBody.insertParagraph(0, "SOCIAL PUSH® - CERTIFICACIÓN TÉCNICA").setHeading(DocumentApp.ParagraphHeading.HEADING1).setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+       diagBody.appendParagraph(`FECHA: ${new Date().toLocaleDateString('es-MX')}`);
+       diagBody.appendParagraph(`CLIENTE: ${payload.nombre || ""}`);
+       diagBody.appendParagraph(`CURP: ${payload.curp || ""}`);
+       diagBody.appendParagraph(`SERVICIOS: ${payload.servicios || ""}`);
+       diagBody.appendHorizontalRule();
+       diagBody.appendParagraph("DICTAMEN TÉCNICO:").setBold(true);
+       diagBody.appendParagraph(payload.dictamen || "");
+       diagBody.appendHorizontalRule();
+       diagBody.appendParagraph(`ASESOR CERTIFICADOR: ${payload.asesor || ""}`);
+
+       if (payload.firmaAsesor) {
+         try {
+           const faBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaAsesor.split(",")[1]), "image/png");
+           diagBody.appendImage(faBlob).setWidth(150).setHeight(75);
+         } catch(errFirma) {}
+       }
+
+       diagDoc.saveAndClose();
+       const diagFile = DriveApp.getFileById(diagDoc.getId());
+       diagFile.moveTo(folder);
+       diagFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     }
   } catch(e) {
-    debugSheet.appendRow([new Date(), "❌ ERROR GENERANDO CONTRATO", e.toString()]);
+    logDebug("❌ ERROR GENERANDO CONTRATO", e.toString());
   }
   
-  return res;
+  return { success: true, ...res };
 }
 
 function doGet(e) {
-  const action = e.parameter.action;
-  if (action === 'LOGIN') {
-    return handleLogin(e.parameter.email);
+  try {
+    const action = e.parameter.action;
+    if (action === 'LOGIN') {
+      return handleLogin(e.parameter.email);
+    }
+    if (action === 'GET_CLIENTE_STATUS') {
+      const identifier = e.parameter.curp || e.parameter.id;
+      if (!identifier) return createResponse({ status: 'error' }, 400);
+      
+      const clientes = getSheetData("CLIENTES");
+      // CORRECCIÓN CRÍTICA: Busca tanto en la columna ID (A) como en la columna CURP (D)
+      const cliente = clientes.find(c => 
+        (c.id && c.id.toString().toUpperCase() === identifier.toUpperCase()) || 
+        (c.curp && c.curp.toString().toUpperCase() === identifier.toUpperCase())
+      );
+      
+      if (cliente) {
+        const folderId = cliente.id_carpeta_drive || cliente.idcarpetadrive;
+        if (folderId) {
+          try {
+            const folder = DriveApp.getFolderById(folderId);
+            const files = folder.getFiles();
+            cliente.drive_verificado = true;
+            while (files.hasNext()) {
+              const f = files.next();
+              const name = f.getName().toUpperCase();
+              const url = f.getUrl();
+              if (name.includes("INE")) cliente.ine_url = url;
+              if (name.includes("FISCAL") || name.includes("CSF")) cliente.csf_url = url;
+              if (name.includes("DOMICILIO") || name.includes("COMPROBANTE")) cliente.domicilio_url = url;
+              if (name.includes("SEMANAS")) cliente.semanas_url = url;
+              if (name.includes("AFORE")) cliente.afore_url = url;
+              if (name.includes("SELFIE")) cliente.selfie_url = url;
+              if (name.includes("CONTRATO")) cliente.contrato_url = url;
+              if (name.includes("COMPLEMENTARIO")) cliente.complementario_url = url;
+            }
+          } catch(err) { cliente.drive_verificado = false; }
+        }
+        // CORRECCIÓN CRÍTICA: Buscar Diagnóstico (Hoja de Servicio) para el portal de firma
+        const hojas = getSheetData("HOJAS_SERVICIO");
+        const miHoja = hojas.reverse().find(h => 
+          (h.idcliente && h.idcliente.toString().toUpperCase() === identifier.toUpperCase()) ||
+          (h.clienteid && h.clienteid.toString().toUpperCase() === identifier.toUpperCase())
+        );
+        if (miHoja) {
+          cliente.hojaservicio = miHoja;
+          // Mapeo específico para compatibilidad con el frontend
+          cliente.diagnosticoTexto = miHoja.diagnostico || miHoja.notasdiagnostico || miHoja.notas || miHoja.dictamen || "";
+        }
+
+        return createResponse({ status: 'success', data: cliente });
+      }
+      return createResponse({ status: 'error' }, 404);
+    }
+    if (action === 'GET_DATA') return handleGetData(e.parameter.sheetName);
+    return createResponse({ message: "API BAKSO Activa" });
+  } catch (err) {
+    logDebug("❌ ERROR GET", err.toString());
+    return createResponse({ error: err.toString() }, 500);
   }
-  if (action === 'GET_CLIENTE_STATUS') {
-    const identifier = e.parameter.curp || e.parameter.id;
-    if (!identifier) return createResponse({ status: 'error' }, 400);
+}
+
+function handleGetClienteStatus(payload) {
+  try {
+    const identifier = payload.curp || payload.id || payload.clienteId;
+    if (!identifier) return createResponse({ status: 'error', message: 'ID Requerido' }, 400);
     
     const clientes = getSheetData("CLIENTES");
-    // CORRECCIÓN CRÍTICA: Busca tanto en la columna ID (A) como en la columna CURP (D)
     const cliente = clientes.find(c => 
-      (c.id && c.id.toString().toUpperCase() === identifier.toUpperCase()) || 
-      (c.curp && c.curp.toString().toUpperCase() === identifier.toUpperCase())
+      (c.id && c.id.toString().toUpperCase() === identifier.toString().toUpperCase()) || 
+      (c.curp && c.curp.toString().toUpperCase() === identifier.toString().toUpperCase())
     );
     
     if (cliente) {
@@ -163,36 +336,18 @@ function doGet(e) {
           while (files.hasNext()) {
             const f = files.next();
             const name = f.getName().toUpperCase();
-            const url = f.getUrl();
-            if (name.includes("INE")) cliente.ine_url = url;
-            if (name.includes("FISCAL") || name.includes("CSF")) cliente.csf_url = url;
-            if (name.includes("DOMICILIO") || name.includes("COMPROBANTE")) cliente.domicilio_url = url;
-            if (name.includes("SEMANAS")) cliente.semanas_url = url;
-            if (name.includes("AFORE")) cliente.afore_url = url;
-            if (name.includes("SELFIE")) cliente.selfie_url = url;
-            if (name.includes("CONTRATO")) cliente.contrato_url = url;
-            if (name.includes("COMPLEMENTARIO")) cliente.complementario_url = url;
+            if (name.includes("INE")) cliente.ine_url = f.getUrl();
+            if (name.includes("FISCAL") || name.includes("CSF")) cliente.csf_url = f.getUrl();
+            // ... otros mapeos si son críticos, pero los más importantes están en doGet
           }
-        } catch(err) { cliente.drive_verificado = false; }
+        } catch(e) {}
       }
-      // CORRECCIÓN CRÍTICIA: Buscar Diagnóstico (Hoja de Servicio) para el portal de firma
-      const hojas = getSheetData("HOJAS_SERVICIO");
-      const miHoja = hojas.reverse().find(h => 
-        (h.idcliente && h.idcliente.toString().toUpperCase() === identifier.toUpperCase()) ||
-        (h.clienteid && h.clienteid.toString().toUpperCase() === identifier.toUpperCase())
-      );
-      if (miHoja) {
-        cliente.hojaservicio = miHoja;
-        // Mapeo específico para compatibilidad con el frontend
-        cliente.diagnosticoTexto = miHoja.diagnostico || miHoja.notasdiagnostico || "";
-      }
-
       return createResponse({ status: 'success', data: cliente });
     }
-    return createResponse({ status: 'error' }, 404);
+    return createResponse({ status: 'error', message: 'No encontrado' }, 404);
+  } catch(e) {
+    return createResponse({ status: 'error', error: e.toString() }, 500);
   }
-  if (action === 'GET_DATA') return handleGetData(e.parameter.sheetName);
-  return createResponse({ message: "API BAKSO Activa" });
 }
 
 function handleCreateCliente(payload) {
@@ -227,8 +382,8 @@ function handleCreateCliente(payload) {
   if (existingRowIndex > -1) {
     rowData = [...values[existingRowIndex]];
   } else {
-    // Fila por defecto con 22 columnas
-    rowData = new Array(22).fill("");
+    // Fila por defecto con 23 columnas (A-W)
+    rowData = new Array(23).fill("");
   }
 
   // 3. ACTUALIZACIÓN SELECTIVA (Solo si el payload trae el dato)
@@ -239,11 +394,16 @@ function handleCreateCliente(payload) {
   mapUpdate(2, payload.apellidos);                           // C: Apellidos
   mapUpdate(3, payload.curp);                                // D: CURP
   
-  if (payload.nssList && Array.isArray(payload.nssList)) {
-    mapUpdate(4, payload.nssList.join(", "));                // E: # NSS
-  } else if (payload.nss) {
-    mapUpdate(4, payload.nss);
+  // NSS Handling: Prefer list if it has elements, else fallback to single nss
+  let nssValue = "";
+  if (payload.nssList && Array.isArray(payload.nssList) && payload.nssList.filter(n=>n).length > 0) {
+    // Merge main NSS with list if not already there
+    const allNss = [...new Set([payload.nss, ...payload.nssList].filter(n => n))];
+    nssValue = allNss.join(", ");
+  } else {
+    nssValue = payload.nss || "";
   }
+  mapUpdate(4, nssValue);                                    // E: NSS (Column 5)
   
   mapUpdate(5, payload.rfc);                                 // F: RFC
   mapUpdate(6, payload.whatsapp);                            // G: WhatsApp
@@ -273,6 +433,14 @@ function handleCreateCliente(payload) {
   mapUpdate(19, payload.desgloseSemanas);                     // T: Desglose de Semanas
   mapUpdate(20, payload.estatusfirma || rowData[20] || "PENDIENTE"); // U: estatusfirma
   mapUpdate(21, payload.ine_url);                             // V: ine_url
+
+  // 4. DATOS ESTRUCTURADOS (JSON) para campos dinámicos
+  const extraMetadata = {
+    nssList: payload.nssList || [],
+    contactosExtra: payload.contactosExtra || [],
+    metadatosAuditoria: payload.metadatosAuditoria || {}
+  };
+  mapUpdate(22, JSON.stringify(extraMetadata));               // W: Metadata_JSON
 
   if (existingRowIndex > -1) {
     sheet.getRange(existingRowIndex + 1, 1, 1, rowData.length).setValues([rowData]);
@@ -343,9 +511,11 @@ function handleGetData(sheetName) {
 }
 
 function getSheetData(name) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(name);
   if (!sheet) return [];
   const values = sheet.getDataRange().getValues();
+  if (values.length === 0) return [];
   const headers = values.shift();
   return values.map(row => {
     const obj = {};
@@ -360,7 +530,7 @@ function getSheetData(name) {
 function handleLogin(incomingEmail) {
   if (!incomingEmail) return createResponse({ success: false, error: 'Email requerido' }, 400);
   const cleanIncomingEmail = incomingEmail.toString().replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   let sheet = ss.getSheetByName("USUARIOS");
   if (!sheet) {
     sheet = ss.insertSheet("USUARIOS");
@@ -383,7 +553,7 @@ function handleLogin(incomingEmail) {
 }
 
 function handleLogAction(payload, email) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   let logSheet = ss.getSheetByName("LOGS") || ss.insertSheet("LOGS");
   logSheet.appendRow([new Date(), email || "Desconocido", payload.accion || "INFO", payload.detalles || ""]);
   return createResponse({ success: true });

@@ -64,9 +64,9 @@ export default function Layout({ children }: LayoutProps) {
             <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200 shrink-0">
               <ShieldCheck size={24} />
             </div>
-            <div className="hidden md:block">
-              <h1 className="font-bold text-slate-900 text-sm leading-tight uppercase tracking-tighter">BAKSO S.C.</h1>
-              <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Social Push MR</p>
+            <div className="hidden md:block overflow-hidden">
+              <h1 className="font-bold text-slate-900 text-[11px] leading-tight uppercase tracking-tighter truncate">Social Push® ERP</h1>
+              <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest truncate">REINI V1</p>
             </div>
           </Link>
           

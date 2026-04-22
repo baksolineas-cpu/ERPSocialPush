@@ -22,7 +22,7 @@ export async function callGAS(action: string, payload: any = {}, userEmail: stri
     }
     
     const result = JSON.parse(text);
-    console.log("CONEXIÓN EXITOSA CON GAS:", result);
+    // console.log("CONEXIÓN EXITOSA CON GAS:", result);
     return result; 
   } catch (error) {
     console.error("Error en callGAS:", error);
@@ -61,14 +61,15 @@ export async function getGASData(action: string = 'GET_ALL', params: any = {}) {
     });
     
     const text = await response.text();
-    console.log('RESPUESTA SERVIDOR:', text);
+    // Identificado por el usuario como "error infinito" por la frecuencia de loggeo
+    // console.log('RESPUESTA SERVIDOR:', text);
     
     try {
       const result = JSON.parse(text);
       if (result.message === "API BAKSO Activa" && action === "LOGIN") {
          throw new Error('Error de Sincronización: El script de Google no ha sido actualizado con la función de Login');
       }
-      console.log("CONEXIÓN EXITOSA CON GAS (GET):", result);
+      // console.log("CONEXIÓN EXITOSA CON GAS (GET):", result);
       return result;
     } catch (parseError: any) {
       if (parseError.message.includes('Error de Sincronización')) throw parseError;

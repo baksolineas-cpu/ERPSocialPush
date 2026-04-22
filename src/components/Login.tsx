@@ -25,8 +25,8 @@ export default function Login() {
         </div>
         
         <div className="space-y-2">
-          <h1 className="text-3xl font-bold text-slate-900">BAKSO CRM</h1>
-          <p className="text-slate-500">Entrevista HUB 1:1 - Acceso Restringido</p>
+          <h1 className="text-3xl font-bold text-slate-900">Social Push® ERP</h1>
+          <p className="text-slate-500">Acceso Restringido | Ingresa con tu correo y contraseña.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

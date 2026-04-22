@@ -9,7 +9,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import SignatureCanvas from 'react-signature-canvas';
 
-import { cn, calculateDetailedAge, VALIDATORS } from '@/lib/utils';
+import { cn, calculateDetailedAge, VALIDATORS, copyToClipboard } from '@/lib/utils';
 import { getGASData, callGAS } from '@/services/apiService';
 import { extractDocumentData, getConsultorChatResponse } from '@/services/geminiService';
 import { Cliente } from '@/types';
@@ -64,9 +64,13 @@ export default function EntrevistaHub() {
   const [searchPerformed, setSearchPerformed] = useState(false);
   const [foundClients, setFoundClients] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [certificationReady, setCertificationReady] = useState(false);
+  const [finalLink, setFinalLink] = useState('');
   const [analyzingCount, setAnalyzingCount] = useState(0); 
   const [lockedFields, setLockedFields] = useState<Set<string>>(new Set());
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [filePreviews, setFilePreviews] = useState<Record<string, string>>({});
+  const [ocrSummaries, setOcrSummaries] = useState<Record<string, any>>({});
   
   const activeUploadRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +80,7 @@ export default function EntrevistaHub() {
     estatusfirma: 'PENDIENTE',
     expedienteExistingFiles: {},
     nssList: [],
+    contactosExtra: [],
     ultimoSalario: 0,
     regimenFiscal: '',
     nivelCerteza: 'Bajo',
@@ -120,16 +125,18 @@ export default function EntrevistaHub() {
     // Solo polleamos en Paso 4 si tenemos un ID válido y no está firmado aún
     const isValidId = data.id && !data.id.startsWith('NEW_') && data.id.length >= 10;
     
-    if (activeStep === 4 && isValidId && data.estatusfirma !== 'FIRMADO') {
+    if (activeStep === 4 && isValidId && data.estatusfirma !== 'FIRMADO' && data.estatusfirma !== 'COMPLETADO') {
       interval = setInterval(async () => {
         try {
           const res = await getGASData('GET_CLIENTE_STATUS', { curp: data.id });
           
           if (res?.status === 'success' && res.data) {
-            if (res.data.estatusfirma === 'FIRMADO' || res.data.estatusfirma === 'FORMALIZADO') {
-              updateData({ estatusfirma: 'FIRMADO' });
+            const remoteStatus = res.data.estatusfirma || res.data.statusSignature;
+            if (['FIRMADO', 'FORMALIZADO', 'COMPLETADO'].includes(remoteStatus)) {
+              updateData({ estatusfirma: 'COMPLETADO' });
               setShowSuccessOverlay(true);
-              registrarAccion("¡Expediente firmado por el cliente detectado!");
+              registrarAccion("¡Expediente completado y formalizado detectado!");
+              addToast("Expediente firmado y PDFs generados", 'success');
               clearInterval(interval);
             }
           } else if (res?.status === 'error') {
@@ -151,6 +158,40 @@ export default function EntrevistaHub() {
 
   const updateData = (newData: Partial<Cliente>) => {
     setData(prev => ({ ...prev, ...newData }));
+  };
+
+  const addNssAdicional = () => {
+    setData(prev => ({ ...prev, nssList: [...(prev.nssList || []), ""] }));
+    registrarAccion("Se añadió un campo para NSS adicional.");
+  };
+
+  const updateNssAdicional = (index: number, val: string) => {
+    const newList = [...(data.nssList || [])];
+    newList[index] = val.replace(/\D/g, '').substring(0, 11);
+    updateData({ nssList: newList });
+  };
+
+  const removeNssAdicional = (index: number) => {
+    const newList = data.nssList?.filter((_, i) => i !== index);
+    updateData({ nssList: newList });
+    registrarAccion("Se eliminó un campo de NSS adicional.");
+  };
+
+  const addContactoExtra = () => {
+    setData(prev => ({ ...prev, contactosExtra: [...(prev.contactosExtra || []), { etiqueta: '', valor: '' }] }));
+    registrarAccion("Se añadió un campo para contacto adicional.");
+  };
+
+  const updateContactoExtra = (index: number, field: 'etiqueta' | 'valor', val: string) => {
+    const newList = [...(data.contactosExtra || [])];
+    newList[index] = { ...newList[index], [field]: val };
+    updateData({ contactosExtra: newList });
+  };
+
+  const removeContactoExtra = (index: number) => {
+    const newList = data.contactosExtra?.filter((_, i) => i !== index);
+    updateData({ contactosExtra: newList });
+    registrarAccion("Se eliminó un campo de contacto adicional.");
   };
 
   const handleSearch = async () => {
@@ -228,10 +269,12 @@ export default function EntrevistaHub() {
         reader.readAsDataURL(file);
       });
       
+      setFilePreviews(prev => ({ ...prev, [type]: base64 }));
       setFileProgress(prev => ({ ...prev, [type]: 30 }));
       
       try {
         const extracted = await extractDocumentData(base64, file.type, type.toUpperCase());
+        setOcrSummaries(prev => ({ ...prev, [type]: extracted }));
         setFileProgress(prev => ({ ...prev, [type]: 85 }));
         const updatePayload: any = { expedienteExistingFiles: { ...data.expedienteExistingFiles, [type]: true } };
 
@@ -388,15 +431,9 @@ export default function EntrevistaHub() {
     setActiveStep(4);
   };
 
-  const handleFinalizarCertificacion = async (method: 'whatsapp' | 'email') => {
+  const handleSellarExpediente = async () => {
     if (!asesorNombre || sigCanvasAsesor.current?.isEmpty()) {
       addToast("El asesor debe firmar antes de formalizar el envío.", 'error'); return;
-    }
-    
-    // Open window synchronously to bypass popup blockers on mobile/safari
-    let popupWindow: Window | null = null;
-    if (method === 'whatsapp') {
-      popupWindow = window.open('about:blank', '_blank');
     }
     
     setIsProcessing(true);
@@ -405,8 +442,6 @@ export default function EntrevistaHub() {
     if (hojaServicio.otroServicioTexto) serviciosFinales.push(hojaServicio.otroServicioTexto);
 
     try {
-      // 5. MATERIALIDAD Y PDF (APPS SCRIPT) - Acción FINALIZE_AUDIT
-      // Enviamos el objeto 'data' completo para que el merge en GAS no pierda información (Nombre, CURP, etc)
       const res = await callGAS('FINALIZE_AUDIT', {
         ...data,
         asesor: asesorNombre,
@@ -418,38 +453,42 @@ export default function EntrevistaHub() {
       });
 
       if (res?.success) {
-         // 2. FILTRO INTELIGENTE DE CONTRATO
+         const realId = res.id || data.id;
+         if (data.id !== realId) {
+            setData(prev => ({ ...prev, id: realId, id_carpeta_drive: res.id_carpeta_drive || data.id_carpeta_drive }));
+         }
+
          const yaTieneContrato = data.contratourl && data.contratourl.length > 5;
          const tipoDoc = yaTieneContrato ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
          
-         // URL robusta para el portal de firma
          const baseUrl = window.location.origin;
-         const link = `${baseUrl}/firma-externa/${data.id}?tipoDoc=${tipoDoc}`;
-         
-         const mensaje = `Hola ${data.nombre}, soy ${asesorNombre} de Social Push®. Hemos generado tu ${yaTieneContrato ? 'Hoja de Diagnóstico' : 'Contrato y Diagnóstico'} técnico. Por favor, revísalo y fírmalo aquí: ${link}`;
-         const asunto = `Formalización de Expediente Digital - Social Push® (${tipoDoc})`;
-
-         if (method === 'whatsapp') {
-            // En México, para links de WA, se recomienda 52 + 10 dígitos (o 521 si es necesario para algunos sistemas antiguos)
-            // Probamos con el estándar actual: 52 + 10 dígitos
-            const phone = (data.whatsapp || '').toString().replace(/\D/g, '');
-            const waNumber = phone.length === 10 ? `52${phone}` : phone;
-            const url = `https://wa.me/${waNumber}?text=${encodeURIComponent(mensaje)}`;
-            if (popupWindow) popupWindow.location.href = url;
-         } else {
-            window.location.href = `mailto:${data.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(mensaje)}`;
-         }
-         
-         registrarAccion(`Expediente Certificado. Notificación enviada vía ${method} (${tipoDoc}).`);
-         addToast("Expediente Certificado y Enviado", 'success');
+         const link = `${baseUrl}/firma-externa/${realId}?tipoDoc=${tipoDoc}`;
+         setFinalLink(link);
+         setCertificationReady(true);
+         addToast("Expediente sellado y sellos generados ✓", 'success');
+         registrarAccion(`Expediente Certificado. Preparado para envío (${tipoDoc}).`);
       } else {
-         if (popupWindow) popupWindow.close();
          addToast("La certificación falló", 'error');
       }
     } catch (e) {
-      if (popupWindow) popupWindow.close();
       addToast("Error al finalizar", 'error');
     } finally { setIsProcessing(false); }
+  };
+
+  const handleEnviarNotificacion = (method: 'whatsapp' | 'email') => {
+    const yaTieneContrato = data.contratourl && data.contratourl.length > 5;
+    const tipoDoc = yaTieneContrato ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
+    const mensaje = `Hola ${data.nombre || 'Cliente'}, soy ${asesorNombre} de Social Push®. Hemos generado tu ${yaTieneContrato ? 'Hoja de Diagnóstico' : 'Contrato y Diagnóstico'} técnico. Por favor, revísalo y fírmalo aquí: ${finalLink}`;
+
+    if (method === 'whatsapp') {
+       const phone = (data.whatsapp || '').toString().replace(/\D/g, '');
+       const waNumber = phone.length === 10 ? `52${phone}` : phone;
+       const url = `https://api.whatsapp.com/send?phone=${waNumber}&text=${encodeURIComponent(mensaje)}`;
+       window.open(url, '_blank') || (window.location.href = url);
+    } else {
+       const mailUrl = `mailto:${data.email}?subject=${encodeURIComponent(`Formalización - Social Push® (${tipoDoc})`)}&body=${encodeURIComponent(mensaje)}`;
+       window.location.href = mailUrl;
+    }
   };
 
   const detailedAge = data.curp ? calculateDetailedAge(data.curp) : null;
@@ -460,7 +499,7 @@ export default function EntrevistaHub() {
       <header className="bg-[#003366] py-5 px-8 flex justify-between items-center shadow-xl sticky top-0 z-50">
         <div className="flex items-center gap-4">
           <div className="bg-[#DAA520] p-2.5 rounded-xl shadow-lg"><ShieldCheck className="text-[#003366]" size={24} /></div>
-          <h1 className="text-lg font-black text-white uppercase tracking-tight">Social Push® HUB</h1>
+          <h1 className="text-lg font-black text-white uppercase tracking-tight">Social Push® ERP</h1>
         </div>
         {data.id && <button onClick={() => {if(confirm("¿Cerrar caso?")) window.location.reload();}} className="px-5 py-2 bg-white/10 text-white rounded-lg text-[10px] font-black uppercase">Cerrar Caso</button>}
       </header>
@@ -518,16 +557,51 @@ export default function EntrevistaHub() {
                           if (doc.id === 'selfie' && data.id?.startsWith('NEW_')) return null;
 
                           return (
-                            <div key={doc.id} className={cn("p-6 rounded-[32px] border-2 transition-all flex flex-col items-center text-center gap-4 relative", exists ? "bg-emerald-50 border-emerald-100" : "bg-slate-50 border-slate-100 hover:border-[#003366]")}>
-                              {exists && <button onClick={() => updateData({ expedienteExistingFiles: {...data.expedienteExistingFiles, [doc.id]: false}})} className="absolute top-4 right-4 p-2 text-red-400 hover:bg-red-50 rounded-full z-20"><Trash2 size={18}/></button>}
-                              <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shadow-md", exists ? "bg-emerald-500 text-white" : "bg-white text-slate-300")}>
-                                 {exists ? <CheckCircle2 size={24} /> : <FileText size={24} />}
+                            <div key={doc.id} className={cn("p-6 rounded-[32px] border-2 transition-all flex flex-col gap-5 relative", exists ? "bg-emerald-50/30 border-emerald-100" : "bg-slate-50 border-slate-100 hover:border-[#003366]")}>
+                              {exists && <button onClick={() => updateData({ expedienteExistingFiles: {...data.expedienteExistingFiles, [doc.id]: false}})} className="absolute top-4 right-4 p-2 text-red-400 hover:bg-red-50 rounded-full z-30 transition-all"><Trash2 size={18}/></button>}
+                              
+                              <div className="flex items-center gap-4">
+                                <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shadow-md shrink-0 transition-transform duration-500", exists ? "bg-emerald-500 text-white" : "bg-white text-slate-300")}>
+                                   {exists ? <CheckCircle2 size={24} /> : <FileText size={24} />}
+                                </div>
+                                <div className="text-left">
+                                   <p className="text-[10px] md:text-[11px] font-black uppercase leading-tight text-slate-900 break-words">{doc.label}</p>
+                                   <p className="text-[8px] font-bold text-slate-400 uppercase mt-0.5 leading-tight">{doc.sub}</p>
+                                </div>
                               </div>
-                              <div>
-                                 <p className="text-sm font-black uppercase leading-none text-slate-900">{doc.label}</p>
-                                 <p className="text-[9px] font-bold text-slate-400 uppercase mt-1">{doc.sub}</p>
-                              </div>
-                              <button onClick={() => { activeUploadRef.current = doc.id; fileInputRef.current?.click(); }} disabled={uploadingId === doc.id} className={cn("w-full py-3 rounded-xl font-black text-[10px] uppercase shadow-sm transition-all relative overflow-hidden", exists ? "bg-white text-emerald-600 border border-emerald-100" : "bg-[#003366] text-white")}>
+
+                              {/* Preview Area */}
+                              {exists && filePreviews[doc.id] && (
+                                <div className="w-full aspect-[4/3] rounded-2xl bg-white border border-slate-100 overflow-hidden relative group/preview shadow-inner">
+                                   {filePreviews[doc.id].includes('data:application/pdf') ? (
+                                     <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 text-slate-400 gap-2">
+                                        <FileText size={32} />
+                                        <span className="text-[8px] font-black uppercase tracking-widest">Documento PDF</span>
+                                     </div>
+                                   ) : (
+                                     <img src={filePreviews[doc.id]} alt="Preview" className="w-full h-full object-cover grayscale group-hover/preview:grayscale-0 transition-all duration-700" />
+                                   )}
+                                   <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
+                                </div>
+                              )}
+
+                              {/* Extracted Details Summary */}
+                              {exists && ocrSummaries[doc.id] && (
+                                <div className="bg-white/60 p-4 rounded-2xl border border-slate-100 space-y-2 text-left animate-in slide-in-from-top-2 duration-500">
+                                   <h5 className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-2">
+                                      <FileSearch size={10} className="text-[#DAA520]" /> Datos Identificados
+                                   </h5>
+                                   <div className="grid grid-cols-1 gap-1.5">
+                                      {ocrSummaries[doc.id].nombre && <div className="flex justify-between items-center"><span className="text-[7px] font-bold text-slate-400 uppercase">Nombre:</span><span className="text-[8px] font-black uppercase text-slate-600 truncate ml-2 max-w-[120px]">{ocrSummaries[doc.id].nombre}</span></div>}
+                                      {ocrSummaries[doc.id].curp && <div className="flex justify-between items-center"><span className="text-[7px] font-bold text-slate-400 uppercase">CURP:</span><span className="text-[8px] font-mono font-bold text-[#003366]">{ocrSummaries[doc.id].curp}</span></div>}
+                                      {ocrSummaries[doc.id].rfc && <div className="flex justify-between items-center"><span className="text-[7px] font-bold text-slate-400 uppercase">RFC:</span><span className="text-[8px] font-mono font-bold text-[#003366]">{ocrSummaries[doc.id].rfc}</span></div>}
+                                      {ocrSummaries[doc.id].nss && <div className="flex justify-between items-center"><span className="text-[7px] font-bold text-slate-400 uppercase">NSS:</span><span className="text-[8px] font-mono font-bold text-[#003366]">{ocrSummaries[doc.id].nss}</span></div>}
+                                      {ocrSummaries[doc.id].semanasCotizadas > 0 && <div className="flex justify-between items-center"><span className="text-[7px] font-bold text-slate-400 uppercase">Semanas:</span><span className="text-[8px] font-black text-emerald-600">{ocrSummaries[doc.id].semanasCotizadas}</span></div>}
+                                   </div>
+                                </div>
+                              )}
+
+                              <button onClick={() => { activeUploadRef.current = doc.id; fileInputRef.current?.click(); }} disabled={uploadingId === doc.id} className={cn("w-full py-4 rounded-2xl font-black text-[10px] uppercase shadow-md transition-all relative overflow-hidden mt-auto", exists ? "bg-white text-emerald-600 border border-emerald-100" : "bg-[#003366] text-white")}>
                                  {uploadingId === doc.id ? (
                                     <>
                                        <div className="absolute inset-0 bg-[#002244] z-0" />
@@ -561,7 +635,19 @@ export default function EntrevistaHub() {
                         <div className="space-y-3">
                             <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Catálogo de Servicios</label>
                             <div className="grid grid-cols-1 gap-2">
-                                {['Proyección de Pensión', 'Cálculo de Semanas', 'Alta Modalidad 40', 'Alta PTI (Mod 10)', 'Juicio de Unificación', 'Asesoría Única'].map(srv => (
+                                {[
+                                    'Asesoría Inicial (Diagnóstico Integral)',
+                                    'Proyección Básica de Pensión (3 escenarios)',
+                                    'Proyección Avanzada de Pensión (5 escenarios)',
+                                    'Inscripción a Modalidad 40',
+                                    'Gestión de Línea de Captura M40',
+                                    'Unificación de NSS / Corrección de Datos',
+                                    'Búsqueda Manual de Semanas',
+                                    'Gestoría de Pensión IMSS (Trámite)',
+                                    'Inscripción PTI (Modalidad 10)',
+                                    'Recuperación de Recursos AFORE',
+                                    'Financiamiento M40 Retroactivo'
+                                ].map(srv => (
                                     <label key={srv} className={cn("flex items-center justify-between p-4 border rounded-2xl cursor-pointer transition-all", hojaServicio.servicios.includes(srv) ? "bg-[#003366] border-[#003366] text-white" : "bg-slate-50 border-slate-100 hover:bg-slate-100")}>
                                         <div className="flex items-center gap-3">
                                             <input type="checkbox" checked={hojaServicio.servicios.includes(srv)} onChange={(e) => setHojaServicio({...hojaServicio, servicios: e.target.checked ? [...hojaServicio.servicios, srv] : hojaServicio.servicios.filter(s => s !== srv)})} className="hidden"/>
@@ -570,9 +656,52 @@ export default function EntrevistaHub() {
                                         {hojaServicio.servicios.includes(srv) && <CheckCircle2 size={16} className="text-[#DAA520]" />}
                                     </label>
                                 ))}
-                                <div className="space-y-2 pt-2">
-                                    <label className="text-[10px] font-black uppercase text-slate-400">Captura Manual (Otros)</label>
-                                    <input type="text" value={hojaServicio.otroServicioTexto} onChange={(e) => setHojaServicio({...hojaServicio, otroServicioTexto: e.target.value})} placeholder="Especificar servicio especial..." className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-[#003366] shadow-sm"/>
+                                <div className="space-y-4 pt-4 border-t border-slate-100">
+                                    <div className="flex justify-between items-center bg-slate-50 p-2 rounded-xl">
+                                      <label className="text-[9px] font-black uppercase text-slate-400 px-2">Servicios Personalizados</label>
+                                      <button 
+                                        type="button" 
+                                        onClick={() => setHojaServicio({...hojaServicio, servicios: [...hojaServicio.servicios, ""]})}
+                                        className="bg-[#DAA520] text-[#003366] px-3 py-1 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 hover:bg-[#c9961d] transition-all"
+                                      >
+                                        <PlusCircle size={10}/> AGREGAR OTRO
+                                      </button>
+                                    </div>
+                                    
+                                    {hojaServicio.servicios.filter(s => !['Proyección de Pensión', 'Cálculo de Semanas', 'Alta Modalidad 40', 'Alta PTI (Mod 10)', 'Juicio de Unificación', 'Asesoría Única'].includes(s)).map((srv, idx) => (
+                                      <div key={`custom-srv-${idx}`} className="flex gap-2 items-center group animate-in slide-in-from-left duration-300">
+                                        <div className="flex-1 relative">
+                                          <input 
+                                            type="text" 
+                                            value={srv} 
+                                            onChange={(e) => {
+                                              const newSrvs = [...hojaServicio.servicios];
+                                              const actualIdx = hojaServicio.servicios.indexOf(srv);
+                                              if (actualIdx !== -1) {
+                                                newSrvs[actualIdx] = e.target.value;
+                                                setHojaServicio({...hojaServicio, servicios: newSrvs});
+                                              }
+                                            }} 
+                                            placeholder="Nombre del servicio..." 
+                                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-[#003366] shadow-sm"
+                                          />
+                                        </div>
+                                        <button 
+                                          type="button" 
+                                          onClick={() => setHojaServicio({...hojaServicio, servicios: hojaServicio.servicios.filter((_, i) => i !== hojaServicio.servicios.indexOf(srv))})}
+                                          className="p-2.5 bg-red-50 text-red-400 hover:bg-red-500 hover:text-white rounded-xl transition-all"
+                                        >
+                                          <Trash2 size={14}/>
+                                        </button>
+                                      </div>
+                                    ))}
+
+                                    <textarea 
+                                      value={hojaServicio.otroServicioTexto} 
+                                      onChange={(e) => setHojaServicio({...hojaServicio, otroServicioTexto: e.target.value})} 
+                                      placeholder="Especificar servicios especiales o notas adicionales..." 
+                                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-[#003366] shadow-inner min-h-[80px]"
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -651,7 +780,7 @@ export default function EntrevistaHub() {
                       <div className="border-b border-slate-200 pb-6 text-center">
                          <img src="https://picsum.photos/seed/bakso/200/50" alt="BAKSO Logo" className="h-8 mx-auto grayscale mb-4 opacity-50" />
                          <h3 className="font-black text-xl uppercase text-slate-900 tracking-tighter">CERTIFICACIÓN DE DIAGNÓSTICO TÉCNICO</h3>
-                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.3em] mt-1">BAKSO, S.C. | DIVISIÓN SOCIAL PUSH®</p>
+                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.3em] mt-1">Social Push® "La Visión del Mañana... HOY" | Bakso S.C.</p>
                       </div>
                       <div className="grid grid-cols-3 gap-6 text-[10px] uppercase font-black text-slate-400 border-b pb-6">
                         <div><p>CLIENTE:</p><p className="text-slate-900">{data.nombre}</p></div>
@@ -697,13 +826,36 @@ export default function EntrevistaHub() {
                    <div className="space-y-4 flex flex-col justify-center">
                       <div className={cn("p-6 rounded-3xl border text-center space-y-6 transition-all", asesorNombre ? "bg-white" : "bg-slate-50 opacity-50")}>
                          <p className="text-[9px] font-black text-[#003366] uppercase tracking-widest">Sellar Expediente y Enviar Firma Externa (Cliente)</p>
-                         <div className="flex gap-2">
-                             <button type="button" disabled={isProcessing} onClick={() => handleFinalizarCertificacion('whatsapp')} className="flex-1 py-5 bg-[#25D366] text-white rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex justify-center items-center gap-2">
-                               {isProcessing ? <Loader2 size={16} className="animate-spin" /> : "WhatsApp"} <Smartphone size={16}/>
-                             </button>
-                             <button type="button" disabled={isProcessing} onClick={() => handleFinalizarCertificacion('email')} className="flex-1 py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex justify-center items-center gap-2">
-                               {isProcessing ? <Loader2 size={16} className="animate-spin" /> : "Email"} <Mail size={16}/>
-                             </button>
+                         <div className="flex flex-col gap-3">
+                             {!certificationReady ? (
+                                <button type="button" onClick={handleSellarExpediente} className="w-full py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2">
+                                  {isProcessing ? <Loader2 size={16} className="animate-spin" /> : "Sellar y Generar Docs"} <ShieldCheck size={16}/>
+                                </button>
+                             ) : (
+                                <div className="flex gap-2">
+                                  <button type="button" onClick={() => handleEnviarNotificacion('whatsapp')} className="flex-1 py-5 bg-[#25D366] text-white rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex justify-center items-center gap-2">
+                                    WhatsApp <Smartphone size={16}/>
+                                  </button>
+                                  <button type="button" onClick={() => handleEnviarNotificacion('email')} className="flex-1 py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex justify-center items-center gap-2">
+                                    Email <Mail size={16}/>
+                                  </button>
+                                </div>
+                             )}
+                             {data.id && !data.id.startsWith('NEW_') && (
+                               <button 
+                                 type="button" 
+                                 onClick={async () => {
+                                   const yaTieneContrato = data.contratourl && data.contratourl.length > 5;
+                                   const tipoDoc = yaTieneContrato ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
+                                   const link = `${window.location.origin}/firma-externa/${data.id}?tipoDoc=${tipoDoc}`;
+                                   await copyToClipboard(link);
+                                   addToast("Link copiado al portapapeles", 'success');
+                                 }}
+                                 className="w-full py-3 bg-slate-100 text-[#003366] rounded-xl font-bold uppercase text-[9px] hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                               >
+                                 <FileSignature size={14}/> Copiar Link Manual
+                               </button>
+                             )}
                          </div>
                       </div>
                    </div>
@@ -810,10 +962,30 @@ export default function EntrevistaHub() {
                 </div>
 
                 <AuditoriaInput registrarAccion={registrarAccion} label="Nombre del Cliente" value={data.nombre} fieldKey="nombre" isLocked={lockedFields.has('nombre')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nombre'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nombre} onChange={(v:any)=>updateData({nombre:v})} />
-                <AuditoriaInput registrarAccion={registrarAccion} label="CURP" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
-                <AuditoriaInput registrarAccion={registrarAccion} label="RFC" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="CURP" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} hasAlert={data.curp && !VALIDATORS.CURP(data.curp)} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="RFC" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} hasAlert={data.rfc && !VALIDATORS.RFC(data.rfc)} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
                 
                 <AuditoriaInput registrarAccion={registrarAccion} label="NSS IMSS" value={data.nss} fieldKey="nss" isLocked={lockedFields.has('nss')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nss'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nss} hasAlert={data.nss && !VALIDATORS.NSS(data.nss)} onChange={(v:any)=>updateData({nss:v.replace(/\D/g, '').substring(0, 11)})} />
+                
+                {/* NSS ADICIONALES DINÁMICOS */}
+                {data.nssList && data.nssList.map((extNss, idx) => (
+                  <div key={`nss-ext-${idx}`} className="flex gap-2 items-end group/nss">
+                    <div className="flex-1">
+                      <AuditoriaInput 
+                        label={`NSS Extra ${idx + 1}`} 
+                        value={extNss} 
+                        hasAlert={extNss && !VALIDATORS.NSS(extNss)}
+                        onChange={(v:any) => updateNssAdicional(idx, v)} 
+                      />
+                    </div>
+                    <button type="button" onClick={() => removeNssAdicional(idx)} className="mb-2 p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 opacity-0 group-hover/nss:opacity-100 transition-all">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+                <button type="button" onClick={addNssAdicional} className="flex items-center gap-2 text-[10px] font-black text-[#DAA520] uppercase tracking-widest hover:text-[#c9961d] transition-all px-1">
+                  <PlusCircle size={14} /> Añadir NSS Adicional
+                </button>
                 
                 <div className="grid grid-cols-2 gap-4">
                     <AuditoriaInput registrarAccion={registrarAccion} label="Semanas IMSS" value={data.semanasCotizadas} fieldKey="semanasCotizadas" isLocked={lockedFields.has('semanasCotizadas')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasCotizadas'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.semanasCotizadas} onChange={(v:any)=>updateData({semanasCotizadas:v})} />
@@ -821,6 +993,37 @@ export default function EntrevistaHub() {
                 </div>
                 <AuditoriaInput registrarAccion={registrarAccion} label="WhatsApp" value={data.whatsapp} fieldKey="whatsapp" isLocked={lockedFields.has('whatsapp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('whatsapp'); setLockedFields(s); }} onChange={(v:any)=>updateData({whatsapp:v})} />
                 <AuditoriaInput registrarAccion={registrarAccion} label="Email de Contacto" value={data.email} fieldKey="email" isLocked={lockedFields.has('email')} onUnlock={() => { const s = new Set(lockedFields); s.delete('email'); setLockedFields(s); }} hasAlert={data.email && !VALIDATORS.EMAIL(data.email)} onChange={(v:any)=>updateData({email:v})} />
+
+                {/* CONTACTOS EXTRA DINÁMICOS */}
+                {data.contactosExtra && data.contactosExtra.map((cX, idx) => (
+                  <div key={`contact-ext-${idx}`} className="bg-white/5 p-3 rounded-2xl border border-white/10 space-y-3 relative group/contact">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[9px] font-black text-white/30 uppercase block mb-1">Etiqueta (ej. Tel. Oficina)</label>
+                        <input 
+                           value={cX.etiqueta} 
+                           onChange={(e)=>updateContactoExtra(idx, 'etiqueta', e.target.value)}
+                           className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#DAA520]/50" 
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-black text-white/30 uppercase block mb-1">Valor</label>
+                        <input 
+                           value={cX.valor} 
+                           onChange={(e)=>updateContactoExtra(idx, 'valor', e.target.value)}
+                           className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#DAA520]/50" 
+                        />
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => removeContactoExtra(idx)} className="absolute -top-2 -right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover/contact:opacity-100 transition-all shadow-lg scale-75">
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
+                <button type="button" onClick={addContactoExtra} className="flex items-center gap-2 text-[10px] font-black text-[#DAA520] uppercase tracking-widest hover:text-[#c9961d] transition-all px-1">
+                  <PlusCircle size={14} /> Añadir Contacto Adicional
+                </button>
+
                 <AuditoriaInput registrarAccion={registrarAccion} label="Régimen Fiscal" value={data.regimenFiscal} fieldKey="regimenFiscal" isLocked={lockedFields.has('regimenFiscal')} onUnlock={() => { const s = new Set(lockedFields); s.delete('regimenFiscal'); setLockedFields(s); }} onChange={(v:any)=>updateData({regimenFiscal:v})} />
             </div>
             
@@ -839,12 +1042,25 @@ export default function EntrevistaHub() {
 
       {/* OVERLAY DE ÉXITO */}
       <AnimatePresence>
-         {data.estatusfirma === 'FIRMADO' && (
+         {(data.estatusfirma === 'FIRMADO' || data.estatusfirma === 'COMPLETADO') && (
             <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-[100] bg-[#003366]/95 flex items-center justify-center p-10 text-center flex-col gap-6 backdrop-blur-md">
                <div className="bg-[#DAA520] p-8 rounded-full shadow-2xl animate-pulse"><CheckCircle size={80} className="text-[#003366]"/></div>
                <h2 className="text-5xl font-black text-white uppercase tracking-tighter">¡Expediente Formalizado!</h2>
-               <p className="text-xl text-emerald-400 font-bold">Firma y Selfie recibidas. El diagnóstico ha sido archivado en Drive.</p>
-               <button type="button" onClick={() => window.location.reload()} className="mt-8 px-10 py-4 bg-white text-[#003366] rounded-full font-black uppercase tracking-widest hover:bg-slate-100 transition-all">Regresar al Tablero Maestro</button>
+               <p className="text-xl text-emerald-400 font-bold italic tracking-tight">Firma y Selfie recibidas. El diagnóstico y contrato han sido sellados en PDF.</p>
+               
+               <div className="flex flex-col md:flex-row gap-4">
+                 <button type="button" onClick={() => window.location.reload()} className="px-10 py-4 bg-white text-[#003366] rounded-full font-black uppercase tracking-widest hover:bg-slate-100 transition-all">Tablero Maestro</button>
+                 {data.id_carpeta_drive && (
+                   <a 
+                     href={`https://drive.google.com/drive/folders/${data.id_carpeta_drive}`} 
+                     target="_blank" 
+                     referrerPolicy="no-referrer"
+                     className="px-10 py-4 bg-[#DAA520] text-[#003366] rounded-full font-black uppercase tracking-widest hover:bg-[#c9961d] transition-all flex items-center gap-2"
+                   >
+                     <ExternalLink size={18} /> Ver Expediente en Drive
+                   </a>
+                 )}
+               </div>
             </motion.div>
          )}
       </AnimatePresence>

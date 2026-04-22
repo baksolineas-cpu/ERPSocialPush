@@ -118,6 +118,7 @@ export interface Cliente {
   createdAt: number;
   modalidadFormalizacion?: 'Presencial' | 'A Distancia';
   remoteSyncSuccess?: boolean;
+  contactosExtra?: { etiqueta: string, valor: string }[];
 }
 
 export interface HojaServicio {

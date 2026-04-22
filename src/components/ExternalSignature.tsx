@@ -21,9 +21,10 @@ export default function ExternalSignature() {
   const [clientData, setClientData] = useState<any>(null);
   const [selfieBase64, setSelfieBase64] = useState<string | undefined>(skipSelfieParam ? 'VALIDO' : undefined);
   const [firmaBase64, setFirmaBase64] = useState<string | undefined>();
+  const [signedDocUrls, setSignedDocUrls] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState(false);
-  const [contractUrl, setContractUrl] = useState(`https://docs.google.com/document/d/12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0/preview`);
+  const [contractUrl, setContractUrl] = useState(`https://drive.google.com/file/d/1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk/preview`);
 
   const webcamRef = useRef<Webcam>(null);
   const sigPad = useRef<SignatureCanvas>(null);
@@ -33,7 +34,8 @@ export default function ExternalSignature() {
       getGASData('GET_CLIENTE_STATUS', { curp: clienteId }).then(res => {
          if (res?.data) {
            setClientData(res.data);
-           if (res.data.contrato_url) setContractUrl(res.data.contrato_url);
+           // El usuario prefiere el contrato PDF por defecto (1y44...)
+           // if (res.data.contrato_url) setContractUrl(res.data.contrato_url);
          }
       }).catch(() => setError("No se pudo cargar la información del expediente."));
     }
@@ -54,13 +56,14 @@ export default function ExternalSignature() {
     setIsProcessing(true);
     setError(null);
     try {
-      await callGAS("UPDATE_CLIENTE_SIGNATURE", {
+      const res = await callGAS("UPDATE_CLIENTE_SIGNATURE", {
           clienteId: clienteId.toUpperCase(),
           tipoDocumento: tipoDoc,
           selfieBase64,
           firmaBase64,
           timestamp: new Date().toISOString()
       });
+      if (res?.signedDocUrls) setSignedDocUrls(res.signedDocUrls);
       setStep(3); // Éxito
     } catch (err) {
       setError("Fallo en la vinculación. Intente de nuevo.");
@@ -70,12 +73,41 @@ export default function ExternalSignature() {
   };
 
   if (step === 3) {
+    const waMessage = `Hola ${clientData?.nombre || 'Cliente'}. Tu expediente ha sido formalizado. Puedes descargar tus documentos aquí: ${signedDocUrls.join(' | ')}`;
+    const waUrl = `https://api.whatsapp.com/send?phone=${(clientData?.whatsapp || '').toString().replace(/\D/g, '')}&text=${encodeURIComponent(waMessage)}`;
+
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center p-10 text-center">
-        <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-6">
+        <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-6 w-full max-w-sm">
           <div className="bg-emerald-100 p-8 rounded-full inline-block"><CheckCircle2 className="text-emerald-600" size={64} /></div>
           <h2 className="text-3xl font-black text-slate-900 uppercase">¡Firma Recibida!</h2>
-          <p className="text-slate-500 max-w-xs mx-auto">Su expediente digital ha sido formalizado correctamente. Ya puede cerrar esta ventana.</p>
+          <p className="text-slate-500 mx-auto">Su expediente digital ha sido formalizado correctamente.</p>
+          
+          <div className="space-y-3 pt-6">
+            {signedDocUrls.map((url, idx) => (
+              <a 
+                key={idx} 
+                href={url} 
+                target="_blank" 
+                rel="noreferrer"
+                className="w-full flex items-center justify-between p-4 bg-slate-50 border rounded-2xl hover:bg-slate-100 transition-all group"
+              >
+                <div className="flex items-center gap-3">
+                  <FileText className="text-slate-400 group-hover:text-blue-600 transition-colors" size={20} />
+                  <span className="text-[10px] font-black uppercase text-slate-600">Documento {idx + 1}</span>
+                </div>
+                <ExternalLink size={14} className="text-slate-300" />
+              </a>
+            ))}
+          </div>
+
+          <button 
+            onClick={() => window.open(waUrl, '_blank')}
+            className="w-full py-4 bg-[#25D366] text-white rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-emerald-100 mt-4"
+          >
+            <MessageSquare size={16} /> Enviar a mi WhatsApp
+          </button>
+
           <p className="text-[10px] text-slate-300 font-bold uppercase tracking-widest pt-10">SOCIAL PUSH © 2026</p>
         </motion.div>
       </div>
@@ -91,63 +123,75 @@ export default function ExternalSignature() {
         </div>
         <div className="bg-white/10 px-4 py-1.5 rounded-full text-white text-[10px] font-black uppercase border border-white/10">ID: {clienteId?.toUpperCase()}</div>
       </header>
-
-      <main className="flex-1 max-w-lg mx-auto w-full p-6 space-y-6">
+ 
+       <main className="flex-1 max-w-4xl mx-auto w-full p-4 md:p-8 space-y-8">
         
         {step === 0 && (
-          <div className="bg-white p-8 rounded-[40px] shadow-xl border border-slate-100 space-y-8 animate-in slide-in-from-bottom duration-500">
-            <div className="text-center space-y-2">
-              <h3 className="text-2xl font-black text-slate-900 uppercase">Diagnóstico y Contrato</h3>
-              <p className="text-xs text-slate-500">Portal de Certificación de Expediente Digital</p>
+          <div className="bg-white p-6 md:p-12 rounded-[40px] shadow-2xl border border-slate-100 space-y-10 animate-in slide-in-from-bottom duration-700">
+            <div className="text-center space-y-3">
+              <h3 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Certificación de Expediente</h3>
+              <p className="text-sm text-slate-400 font-bold uppercase tracking-widest">Revisión de Diagnóstico y Contrato Marco</p>
             </div>
             
-            <div className="bg-slate-50 p-6 rounded-3xl border space-y-6 max-h-[450px] overflow-y-auto custom-scrollbar shadow-inner">
-               <div className="bg-[#003366] p-6 rounded-2xl text-white shadow-lg">
-                  <p className="text-[10px] font-black uppercase text-[#DAA520] tracking-widest mb-1">Titular del Expediente</p>
-                  <p className="text-xl font-black uppercase tracking-tight">{clientData?.nombre || 'Cargando...'}</p>
-                  <div className="flex gap-4 mt-2 opacity-60 text-[10px] font-mono">
-                    <span>CURP: {clientData?.curp || '---'}</span>
-                    <span>RFC: {clientData?.rfc || '---'}</span>
-                  </div>
-               </div>
-
-               {tipoDoc.includes('CONTRATO') && (
-                 <div className="space-y-4">
-                   <div className="flex items-center gap-2 text-slate-400">
-                      <FileText size={14} />
-                      <p className="text-[10px] font-black uppercase tracking-widest font-bold">I. Contrato Marco de Servicios</p>
-                   </div>
-                   <div className="relative group">
-                      <iframe 
-                         src={contractUrl.includes('preview') || contractUrl.includes('export') ? contractUrl : `${contractUrl.replace('/view', '')}/preview`} 
-                         className="w-full h-96 rounded-xl border-2 border-slate-200 shadow-sm"
-                         title="Contrato"
-                      />
-                      <div className="absolute inset-0 border-4 border-emerald-500/0 group-hover:border-emerald-500/10 rounded-xl pointer-events-none transition-all" />
-                   </div>
-                 </div>
-               )}
-
-               <div className="space-y-4 pt-4">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-bold">II. Diagnóstico Inicial Técnico</p>
-                  <div className="bg-white p-6 rounded-2xl text-xs text-slate-600 leading-relaxed border border-slate-200 shadow-sm relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none"><FileText size={80} /></div>
-                    <div className="relative z-10 space-y-4">
-                       <p className="font-bold border-b pb-2 text-slate-900">PARA: {clientData?.nombre || '[NOMBRE]'} | CURP: {clientData?.curp || '[CURP]'} | RFC: {clientData?.rfc || '[RFC]'}</p>
-                       <div className="italic leading-relaxed whitespace-pre-wrap">
-                        {clientData?.diagnosticoTexto || clientData?.hojaservicio?.diagnostico || clientData?.hojaservicio?.notasdiagnostico || "Cargando su diagnóstico personalizado..."}
-                       </div>
+            <div className="space-y-10">
+               <div className="bg-[#003366] p-8 rounded-3xl text-white shadow-xl relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-10 opacity-5 rotate-12"><ShieldCheck size={120} /></div>
+                  <div className="relative z-10">
+                    <p className="text-[10px] font-black uppercase text-[#DAA520] tracking-widest mb-2">Titular del Expediente</p>
+                    <p className="text-3xl font-black uppercase tracking-tight leading-none mb-4">{clientData?.nombre || 'Cargando...'}</p>
+                    <div className="flex flex-wrap gap-6 opacity-80 text-[11px] font-mono border-t border-white/10 pt-4">
+                      <span>CURP: {clientData?.curp || '---'}</span>
+                      <span>RFC: {clientData?.rfc || '---'}</span>
                     </div>
                   </div>
                </div>
+
+               <div className="space-y-12">
+                 {tipoDoc.includes('CONTRATO') && (
+                   <div className="space-y-6">
+                     <div className="flex items-center gap-3 border-b border-slate-100 pb-4 text-[#DAA520]">
+                        <FileText size={18} />
+                        <h4 className="text-xs font-black uppercase tracking-widest font-bold">I. Contrato Marco de Servicios</h4>
+                     </div>
+                     <div className="relative group rounded-3xl overflow-hidden border-2 border-slate-100 shadow-inner bg-slate-50">
+                        <iframe 
+                           src={contractUrl.includes('drive.google.com') && !contractUrl.includes('/preview') ? contractUrl.replace('/view', '/preview') : contractUrl} 
+                           className="w-full h-[700px] border-none"
+                           title="Contrato"
+                        />
+                        <div className="absolute inset-0 pointer-events-none border-4 border-emerald-500/0 group-hover:border-emerald-500/5 transition-all" />
+                     </div>
+                   </div>
+                 )}
+
+                 <div className="space-y-6">
+                   <div className="flex items-center gap-3 border-b border-slate-100 pb-4 text-[#DAA520]">
+                      <FileText size={18} />
+                      <h4 className="text-xs font-black uppercase tracking-widest font-bold">II. Diagnóstico Inicial Certificado</h4>
+                   </div>
+                   <div className="bg-white p-8 md:p-12 rounded-[40px] border-2 border-slate-100 shadow-xl relative group">
+                      <div className="absolute top-0 left-0 w-3 h-full bg-[#DAA520]" />
+                      <div className="flex justify-between items-start mb-8 border-b border-slate-50 pb-6">
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Dictamen para:</p>
+                          <p className="text-sm font-black text-[#003366] uppercase">{clientData?.nombre} | CURP: {clientData?.curp} | RFC: {clientData?.rfc || '[RFC]'}</p>
+                        </div>
+                        <FileText className="text-slate-100 group-hover:text-slate-200 transition-colors" size={48} />
+                      </div>
+                      <div className="text-slate-700 italic leading-relaxed whitespace-pre-wrap font-medium text-lg">
+                        {clientData?.diagnosticoTexto || clientData?.hojaservicio?.diagnostico || clientData?.hojaservicio?.notasdiagnostico || clientData?.hojaservicio?.notas || "Cargando su diagnóstico personalizado..."}
+                      </div>
+                   </div>
+                 </div>
+               </div>
             </div>
 
-            <button onClick={() => setStep(1)} className="w-full py-6 bg-[#003366] text-white rounded-[24px] font-black uppercase text-xs tracking-widest flex items-center justify-center gap-3 shadow-xl hover:bg-slate-800 transition-all">
-              He leído y acepto los términos <ArrowRight size={18} />
+            <button onClick={() => setStep(1)} className="w-full py-6 bg-[#003366] text-white rounded-[32px] font-black uppercase tracking-[0.2em] shadow-2xl hover:bg-[#002244] active:scale-[0.98] transition-all flex items-center justify-center gap-4 group">
+              He leído y acepto los términos <ArrowRight className="group-hover:translate-x-2 transition-transform" />
             </button>
           </div>
         )}
-
+ 
         {step === 1 && (
           <div className="bg-white p-8 rounded-[40px] shadow-xl border border-slate-100 space-y-6 animate-in fade-in duration-500 text-center">
             <div className="flex items-center gap-2 justify-center mb-4 text-[#DAA520]">
