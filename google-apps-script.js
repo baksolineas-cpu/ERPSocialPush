@@ -101,6 +101,38 @@ function handleFinalizeAudit(payload) {
   
   // 2. Registramos formalmente la hoja de servicio/diagnóstico
   handleCreateHoja(payload);
+
+  // 3. GENERACIÓN DE CONTRATO PERSONALIZADO (Copia del Template)
+  try {
+    const templateId = "12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0";
+    const folderId = payload.id_carpeta_drive || payload.idcarpetadrive;
+    if (folderId && templateId) {
+       const folder = DriveApp.getFolderById(folderId);
+       // Eliminar contratos previos si existen para no duplicar
+       const oldFiles = folder.getFiles();
+       while(oldFiles.hasNext()) {
+         const f = oldFiles.next();
+         if (f.getName().includes("CONTRATO_PERSONALIZADO")) f.setTrashed(true);
+       }
+       
+       const copy = DriveApp.getFileById(templateId).makeCopy(`CONTRATO_PERSONALIZADO_${payload.curp || payload.id}`, folder);
+       const doc = DocumentApp.openById(copy.getId());
+       const body = doc.getBody();
+       
+       // Reemplazos robustos
+       body.replaceText("{{NOMBRE}}", payload.nombre || "");
+       body.replaceText("{{CURP}}", payload.curp || "");
+       body.replaceText("{{RFC}}", payload.rfc || "");
+       body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
+       body.replaceText("{{DOMICILIO}}", payload.domicilio || payload.domicilioExtraido || "");
+       body.replaceText("{{NSS}}", payload.nss || "");
+       
+       doc.saveAndClose();
+       copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    }
+  } catch(e) {
+    debugSheet.appendRow([new Date(), "❌ ERROR GENERANDO CONTRATO", e.toString()]);
+  }
   
   return res;
 }

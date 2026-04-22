@@ -19,7 +19,8 @@ export const sanitizeGeminiJson = (text: string): string => {
 export const VALIDATORS = {
   CURP: (val: string) => /^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[0-9A-Z][0-9]$/.test(val),
   NSS: (val: string) => /^[0-9]{11}$/.test(val),
-  RFC: (val: string) => /^[A-Z]{4}[0-9]{6}[A-Z0-9]{3}$/.test(val)
+  RFC: (val: string) => /^[A-Z]{4}[0-9]{6}[A-Z0-9]{3}$/.test(val),
+  EMAIL: (val: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)
 };
 
 export function extractBirthDateFromCurp(curp: string): string | null {

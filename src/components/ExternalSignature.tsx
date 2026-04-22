@@ -22,6 +22,8 @@ export default function ExternalSignature() {
   const [selfieBase64, setSelfieBase64] = useState<string | undefined>(skipSelfieParam ? 'VALIDO' : undefined);
   const [firmaBase64, setFirmaBase64] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState(false);
+  const [contractUrl, setContractUrl] = useState(`https://docs.google.com/document/d/12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0/preview`);
 
   const webcamRef = useRef<Webcam>(null);
   const sigPad = useRef<SignatureCanvas>(null);
@@ -29,7 +31,10 @@ export default function ExternalSignature() {
   useEffect(() => {
     if (clienteId) {
       getGASData('GET_CLIENTE_STATUS', { curp: clienteId }).then(res => {
-         if (res?.data) setClientData(res.data);
+         if (res?.data) {
+           setClientData(res.data);
+           if (res.data.contrato_url) setContractUrl(res.data.contrato_url);
+         }
       }).catch(() => setError("No se pudo cargar la información del expediente."));
     }
   }, [clienteId]);
@@ -37,6 +42,11 @@ export default function ExternalSignature() {
   const captureSelfie = () => {
     const imageSrc = webcamRef.current?.getScreenshot();
     if (imageSrc) setSelfieBase64(imageSrc);
+  };
+
+  const handleCameraError = () => {
+    setCameraError(true);
+    setError("Error de acceso a cámara. Verifique permisos en su navegador.");
   };
 
   const handleSubmit = async () => {
@@ -109,8 +119,8 @@ export default function ExternalSignature() {
                    </div>
                    <div className="relative group">
                       <iframe 
-                         src={`https://docs.google.com/viewer?url=https://docs.google.com/document/d/12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0/export?format=pdf&embedded=true`} 
-                         className="w-full h-64 rounded-xl border-2 border-slate-200 shadow-sm"
+                         src={contractUrl.includes('preview') || contractUrl.includes('export') ? contractUrl : `${contractUrl.replace('/view', '')}/preview`} 
+                         className="w-full h-96 rounded-xl border-2 border-slate-200 shadow-sm"
                          title="Contrato"
                       />
                       <div className="absolute inset-0 border-4 border-emerald-500/0 group-hover:border-emerald-500/10 rounded-xl pointer-events-none transition-all" />
@@ -125,7 +135,7 @@ export default function ExternalSignature() {
                     <div className="relative z-10 space-y-4">
                        <p className="font-bold border-b pb-2 text-slate-900">PARA: {clientData?.nombre || '[NOMBRE]'} | CURP: {clientData?.curp || '[CURP]'} | RFC: {clientData?.rfc || '[RFC]'}</p>
                        <div className="italic leading-relaxed whitespace-pre-wrap">
-                        {clientData?.hojaServicio?.notasDiagnostico || "Cargando su diagnóstico personalizado..."}
+                        {clientData?.diagnosticoTexto || clientData?.hojaservicio?.diagnostico || clientData?.hojaservicio?.notasdiagnostico || "Cargando su diagnóstico personalizado..."}
                        </div>
                     </div>
                   </div>
@@ -144,26 +154,40 @@ export default function ExternalSignature() {
                 <Camera size={24} />
                 <h4 className="text-xs font-black uppercase tracking-widest">1. Validación Biométrica (Selfie)</h4>
             </div>
-            <div className="aspect-square bg-slate-900 rounded-[32px] overflow-hidden ring-8 ring-slate-50 relative group shadow-2xl mx-auto max-w-[320px]">
-              {selfieBase64 && selfieBase64 !== 'VALIDO' ? (
-                <img src={selfieBase64} className="w-full h-full object-cover" alt="Captured Selfie" />
-              ) : (
-                <Webcam 
-                  audio={false} 
-                  ref={webcamRef}
-                  screenshotFormat="image/jpeg" 
-                  screenshotQuality={1} 
-                  className="w-full h-full object-cover" 
-                  videoConstraints={{ facingMode: "user" }} 
-                />
-              )}
-              <button 
-                onClick={selfieBase64 ? () => setSelfieBase64(undefined) : captureSelfie} 
-                className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#003366]/80 backdrop-blur-md text-white px-8 py-3 rounded-full font-black text-[10px] uppercase border border-white/30 hover:bg-[#003366] transition-all"
-              >
-                {selfieBase64 ? "Capturar de nuevo" : "Tomar Foto Ahora"}
-              </button>
-            </div>
+             <div className="aspect-square bg-slate-900 rounded-[32px] overflow-hidden ring-8 ring-slate-50 relative group shadow-2xl mx-auto max-w-[320px]">
+               {selfieBase64 && selfieBase64 !== 'VALIDO' ? (
+                 <img src={selfieBase64} className="w-full h-full object-cover" alt="Captured Selfie" />
+               ) : (
+                 <Webcam 
+                   audio={false} 
+                   ref={webcamRef}
+                   screenshotFormat="image/jpeg" 
+                   screenshotQuality={1} 
+                   onUserMediaError={handleCameraError}
+                   className="w-full h-full object-cover" 
+                   videoConstraints={{ facingMode: "user" }} 
+                 />
+               )}
+               {cameraError ? (
+                 <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-slate-900 text-white space-y-4">
+                   <AlertCircle size={48} className="text-amber-500" />
+                   <p className="text-xs font-bold leading-relaxed">No se detectó acceso a la cámara. Por favor asegúrese de:</p>
+                   <ul className="text-[10px] text-slate-400 space-y-1 text-left list-disc pl-4">
+                     <li>Dar permiso de cámara en el navegador</li>
+                     <li>Activar la cámara en Configuración {'>'} Privacidad</li>
+                     <li>Recargar esta página</li>
+                   </ul>
+                   <button onClick={() => window.location.reload()} className="px-6 py-2 bg-[#DAA520] text-[#003366] rounded-full font-black text-[10px] uppercase">Reintentar</button>
+                 </div>
+               ) : (
+                 <button 
+                   onClick={selfieBase64 ? () => setSelfieBase64(undefined) : captureSelfie} 
+                   className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#003366]/80 backdrop-blur-md text-white px-8 py-3 rounded-full font-black text-[10px] uppercase border border-white/30 hover:bg-[#003366] transition-all"
+                 >
+                   {selfieBase64 ? "Capturar de nuevo" : "Tomar Foto Ahora"}
+                 </button>
+               )}
+             </div>
             <button 
               disabled={!selfieBase64} 
               onClick={() => setStep(2)} 

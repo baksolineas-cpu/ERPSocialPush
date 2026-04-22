@@ -9,7 +9,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import SignatureCanvas from 'react-signature-canvas';
 
-import { cn, calculateDetailedAge } from '@/lib/utils';
+import { cn, calculateDetailedAge, VALIDATORS } from '@/lib/utils';
 import { getGASData, callGAS } from '@/services/apiService';
 import { extractDocumentData, getConsultorChatResponse } from '@/services/geminiService';
 import { Cliente } from '@/types';
@@ -810,17 +810,17 @@ export default function EntrevistaHub() {
                 </div>
 
                 <AuditoriaInput registrarAccion={registrarAccion} label="Nombre del Cliente" value={data.nombre} fieldKey="nombre" isLocked={lockedFields.has('nombre')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nombre'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nombre} onChange={(v:any)=>updateData({nombre:v})} />
-                <AuditoriaInput registrarAccion={registrarAccion} label="CURP Oficial" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
-                <AuditoriaInput registrarAccion={registrarAccion} label="RFC Fiscal" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="CURP" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="RFC" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
                 
-                <AuditoriaInput registrarAccion={registrarAccion} label="NSS IMSS" value={data.nss} fieldKey="nss" isLocked={lockedFields.has('nss')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nss'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nss} onChange={(v:any)=>updateData({nss:v})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="NSS IMSS" value={data.nss} fieldKey="nss" isLocked={lockedFields.has('nss')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nss'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nss} hasAlert={data.nss && !VALIDATORS.NSS(data.nss)} onChange={(v:any)=>updateData({nss:v.replace(/\D/g, '').substring(0, 11)})} />
                 
                 <div className="grid grid-cols-2 gap-4">
                     <AuditoriaInput registrarAccion={registrarAccion} label="Semanas IMSS" value={data.semanasCotizadas} fieldKey="semanasCotizadas" isLocked={lockedFields.has('semanasCotizadas')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasCotizadas'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.semanasCotizadas} onChange={(v:any)=>updateData({semanasCotizadas:v})} />
                     <AuditoriaInput registrarAccion={registrarAccion} label="Último Salario" value={data.ultimoSalario} fieldKey="ultimoSalario" isLocked={lockedFields.has('ultimoSalario')} onUnlock={() => { const s = new Set(lockedFields); s.delete('ultimoSalario'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.ultimoSalario} onChange={(v:any)=>updateData({ultimoSalario:v})} />
                 </div>
                 <AuditoriaInput registrarAccion={registrarAccion} label="WhatsApp" value={data.whatsapp} fieldKey="whatsapp" isLocked={lockedFields.has('whatsapp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('whatsapp'); setLockedFields(s); }} onChange={(v:any)=>updateData({whatsapp:v})} />
-                <AuditoriaInput registrarAccion={registrarAccion} label="Email de Contacto" value={data.email} fieldKey="email" isLocked={lockedFields.has('email')} onUnlock={() => { const s = new Set(lockedFields); s.delete('email'); setLockedFields(s); }} onChange={(v:any)=>updateData({email:v})} />
+                <AuditoriaInput registrarAccion={registrarAccion} label="Email de Contacto" value={data.email} fieldKey="email" isLocked={lockedFields.has('email')} onUnlock={() => { const s = new Set(lockedFields); s.delete('email'); setLockedFields(s); }} hasAlert={data.email && !VALIDATORS.EMAIL(data.email)} onChange={(v:any)=>updateData({email:v})} />
                 <AuditoriaInput registrarAccion={registrarAccion} label="Régimen Fiscal" value={data.regimenFiscal} fieldKey="regimenFiscal" isLocked={lockedFields.has('regimenFiscal')} onUnlock={() => { const s = new Set(lockedFields); s.delete('regimenFiscal'); setLockedFields(s); }} onChange={(v:any)=>updateData({regimenFiscal:v})} />
             </div>
             
