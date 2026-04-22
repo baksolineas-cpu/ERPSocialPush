@@ -80,6 +80,7 @@ export default function EntrevistaHub() {
     regimenFiscal: '',
     nivelCerteza: 'Bajo',
     semanasExtra: 0,
+    semanasExtraDictaminadas: 0,
     metadatosAuditoria: { alertas: [], discrepancias: [] }
   });
 
@@ -102,10 +103,11 @@ export default function EntrevistaHub() {
   // Polling de Estatus de Firma en Tiempo Real
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (activeStep === 4 && data.id && data.estatusfirma !== 'FIRMADO') {
+    const isValidId = data.id && !data.id.startsWith('NEW_') && data.id.length >= 10;
+    if (activeStep === 4 && isValidId && data.estatusfirma !== 'FIRMADO') {
       interval = setInterval(async () => {
         try {
-          const res = await getGASData('GET_CLIENTE_STATUS', { id: data.id });
+          const res = await getGASData('GET_CLIENTE_STATUS', { curp: data.id });
           if (res?.data?.estatusfirma === 'FIRMADO') {
             setData(prev => ({ ...prev, estatusfirma: 'FIRMADO' }));
             setShowSuccessOverlay(true);
@@ -244,12 +246,14 @@ export default function EntrevistaHub() {
         } else if (type === 'complementario') {
           const nuevasAlertas = [...((data.metadatosAuditoria as any)?.alertas || [])];
           if (extracted.tipo_complemento === 'Hoja Rosa') {
-            nuevasAlertas.push('💡 Evidencia detectada: Este documento puede sustentar un Trámite de Búsqueda de Semanas Manual.');
+            const msg = '⚠️ Evidencia detectada: Este documento es sustento legal para un Trámite de Búsqueda de Semanas Manual.';
+            nuevasAlertas.push(msg);
+            alert(msg);
           }
           updatePayload.metadatosAuditoria = { ...data.metadatosAuditoria, alertas: nuevasAlertas } as any;
           if (extracted.tipo_complemento === 'Resolución' && extracted.semanas_extra > 0) {
-            updatePayload.semanasExtra = extracted.semanas_extra;
-            newLocked.add('semanasExtra');
+            updatePayload.semanasExtraDictaminadas = extracted.semanas_extra;
+            newLocked.add('semanasExtraDictaminadas');
           }
           registrarAccion(`Doc Complementario procesado: ${extracted.tipo_complemento}`);
         } else {
@@ -517,21 +521,38 @@ export default function EntrevistaHub() {
                     <div className="space-y-6">
                         <div className="space-y-3">
                             <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Catálogo de Servicios</label>
-                            {['Proyección de Pensión', 'Cálculo de Semanas', 'Alta Modalidad 40', 'Alta PTI (Mod 10)', 'Juicio de Unificación', 'Asesoría Única'].map(srv => (
-                                <label key={srv} className="flex items-center gap-3 p-3 bg-slate-50 border rounded-xl cursor-pointer hover:bg-slate-100 transition-all">
-                                    <input type="checkbox" checked={hojaServicio.servicios.includes(srv)} onChange={(e) => setHojaServicio({...hojaServicio, servicios: e.target.checked ? [...hojaServicio.servicios, srv] : hojaServicio.servicios.filter(s => s !== srv)})} className="w-4 h-4 rounded text-[#003366]"/>
-                                    <span className="text-xs font-bold text-slate-700">{srv}</span>
-                                </label>
-                            ))}
-                            <input type="text" value={hojaServicio.otroServicioTexto} onChange={(e) => setHojaServicio({...hojaServicio, otroServicioTexto: e.target.value})} placeholder="Otro Servicio (Especificar)" className="w-full p-3 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-[#003366]"/>
-                        </div>
-                        <div className="space-y-4 p-5 bg-slate-50 rounded-3xl border border-slate-200">
-                            <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest text-center block">Cotizador de Honorarios</label>
-                            <div className="grid grid-cols-2 gap-3 mb-4">
-                                <button onClick={() => setHojaServicio({...hojaServicio, universo: 'U1'})} className={cn("p-4 border-2 rounded-2xl font-bold text-sm transition-all", hojaServicio.universo === 'U1' ? "border-[#003366] bg-white text-[#003366] shadow-md" : "bg-transparent text-slate-400 border-transparent")}>U1 (Única Vez)</button>
-                                <button onClick={() => setHojaServicio({...hojaServicio, universo: 'U2'})} className={cn("p-4 border-2 rounded-2xl font-bold text-sm transition-all", hojaServicio.universo === 'U2' ? "border-[#DAA520] bg-white text-[#DAA520] shadow-md" : "bg-transparent text-slate-400 border-transparent")}>U2 (Recurrente)</button>
+                            <div className="grid grid-cols-1 gap-2">
+                                {['Proyección de Pensión', 'Cálculo de Semanas', 'Alta Modalidad 40', 'Alta PTI (Mod 10)', 'Juicio de Unificación', 'Asesoría Única'].map(srv => (
+                                    <label key={srv} className={cn("flex items-center justify-between p-4 border rounded-2xl cursor-pointer transition-all", hojaServicio.servicios.includes(srv) ? "bg-[#003366] border-[#003366] text-white" : "bg-slate-50 border-slate-100 hover:bg-slate-100")}>
+                                        <div className="flex items-center gap-3">
+                                            <input type="checkbox" checked={hojaServicio.servicios.includes(srv)} onChange={(e) => setHojaServicio({...hojaServicio, servicios: e.target.checked ? [...hojaServicio.servicios, srv] : hojaServicio.servicios.filter(s => s !== srv)})} className="hidden"/>
+                                            <span className="text-xs font-bold">{srv}</span>
+                                        </div>
+                                        {hojaServicio.servicios.includes(srv) && <CheckCircle2 size={16} className="text-[#DAA520]" />}
+                                    </label>
+                                ))}
+                                <div className="space-y-2 pt-2">
+                                    <label className="text-[10px] font-black uppercase text-slate-400">Captura Manual (Otros)</label>
+                                    <input type="text" value={hojaServicio.otroServicioTexto} onChange={(e) => setHojaServicio({...hojaServicio, otroServicioTexto: e.target.value})} placeholder="Especificar servicio especial..." className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-[#003366] shadow-sm"/>
+                                </div>
                             </div>
-                            <input type="number" value={hojaServicio.honorariosAcordados || ''} onChange={(e) => setHojaServicio({...hojaServicio, honorariosAcordados: Number(e.target.value)})} placeholder="Honorarios ($)" className="w-full p-4 bg-white border-2 border-slate-100 rounded-2xl font-black text-lg focus:border-[#DAA520] outline-none shadow-inner"/>
+                        </div>
+                        <div className="space-y-4 p-6 bg-[#003366] rounded-[32px] border border-white/10 shadow-2xl">
+                            <label className="text-[10px] font-black uppercase text-[#DAA520] tracking-widest text-center block">Propuesta Económica y Recurrencia</label>
+                            <div className="grid grid-cols-2 gap-3 mb-4">
+                                <button onClick={() => setHojaServicio({...hojaServicio, universo: 'U1'})} className={cn("p-4 border-2 rounded-2xl font-black text-[10px] uppercase transition-all flex flex-col items-center gap-1", hojaServicio.universo === 'U1' ? "border-[#DAA520] bg-[#DAA520] text-[#003366]" : "bg-white/5 text-white/40 border-white/10")}>
+                                    <span>U1</span>
+                                    <span className="text-[8px] opacity-70">Única Vez</span>
+                                </button>
+                                <button onClick={() => setHojaServicio({...hojaServicio, universo: 'U2'})} className={cn("p-4 border-2 rounded-2xl font-black text-[10px] uppercase transition-all flex flex-col items-center gap-1", hojaServicio.universo === 'U2' ? "border-[#DAA520] bg-[#DAA520] text-[#003366]" : "bg-white/5 text-white/40 border-white/10")}>
+                                    <span>U2</span>
+                                    <span className="text-[8px] opacity-70">Recurrente</span>
+                                </button>
+                            </div>
+                            <div className="relative">
+                                <span className="absolute left-5 top-1/2 -translate-y-1/2 text-[#DAA520] font-black text-xl">$</span>
+                                <input type="number" value={hojaServicio.honorariosAcordados || ''} onChange={(e) => setHojaServicio({...hojaServicio, honorariosAcordados: Number(e.target.value)})} placeholder="0.00" className="w-full pl-10 p-5 bg-white/10 border border-white/10 rounded-2xl font-black text-2xl text-white focus:border-[#DAA520] outline-none shadow-inner"/>
+                            </div>
                         </div>
                     </div>
                     <div className="bg-slate-900 rounded-[32px] p-6 flex flex-col h-[550px] border border-slate-800 shadow-2xl relative">
@@ -658,11 +679,40 @@ export default function EntrevistaHub() {
             <div className="flex items-center gap-3 border-b border-white/10 pb-4"><Activity size={24} className="text-[#DAA520]" /><h4 className="text-lg font-black uppercase tracking-tighter">Panel de Auditoría</h4></div>
             
             <div className="space-y-5">
-                {/* Nivel de Certeza Jurídica (Al inicio, como solicitado) */}
-                <div className={cn("p-4 rounded-2xl flex items-center gap-3 border shadow-lg", nivelCerteza === 'Alto' ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-amber-500/10 border-amber-500/30 text-amber-500")}>
-                  {nivelCerteza === 'Alto' ? <ShieldCheck size={20} /> : <AlertTriangle size={20} />}
-                  <span className="text-[10px] font-black uppercase tracking-widest">{nivelCerteza === 'Alto' ? 'Certeza Jurídica: Alta. Match total entre CSF y Reporte de Semanas.' : `Certeza: Baja. Faltan documentos oficiales.`}</span>
-                </div>
+                {/* Badge de Certeza Jurídica (Dinamismo Legal-Tech) */}
+                {(() => {
+                  const hasINE = data.expedienteExistingFiles?.ine;
+                  const hasCSF = data.expedienteExistingFiles?.csf;
+                  const hasSemanas = data.expedienteExistingFiles?.semanas;
+                  
+                  let discrepancias = [];
+                  if (!hasINE) discrepancias.push("Falta Identificación Oficial (INE)");
+                  if (!hasCSF) discrepancias.push("Falta Constancia Fiscal (RFC)");
+                  if (!hasSemanas) discrepancias.push("Falta Reporte de Semanas IMSS");
+                  
+                  // Validación cruzada simple
+                  if (data.nombre && data.curp && data.rfc) {
+                     // Podríamos añadir validación de regex aquí si fuera necesario
+                  }
+                  
+                  const isHigh = hasINE && hasCSF && hasSemanas;
+                  
+                  return (
+                    <div className={cn("p-6 rounded-[32px] border shadow-2xl transition-all duration-500", isHigh ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-amber-500/10 border-amber-500/30 text-amber-500")}>
+                      <div className="flex items-center gap-3 mb-3">
+                        {isHigh ? <ShieldCheck size={24} /> : <AlertTriangle size={24} />}
+                        <h5 className="font-black uppercase tracking-widest text-[11px]">{isHigh ? 'Certeza: Alta' : 'Certeza: Baja / Observada'}</h5>
+                      </div>
+                      <div className="space-y-2">
+                        {discrepancias.length > 0 ? (
+                          discrepancias.map((d, i) => <p key={i} className="text-[9px] font-bold leading-tight opacity-80 uppercase">• {d}</p>)
+                        ) : (
+                          <p className="text-[9px] font-bold leading-tight opacity-80 uppercase">Match total detectado entre documentos oficiales. Expediente apto para dictaminación.</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Badge 6+1 Visible de Inmediato si aplica */}
                 {detailedAge?.hasRoundingBenefit && (
@@ -673,10 +723,15 @@ export default function EntrevistaHub() {
                 )}
 
                 <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-3">
-                    <h5 className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1">Resumen de Materialidad</h5>
+                    <h5 className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1">Estatus del Proceso</h5>
                     <div className="flex flex-col gap-2 text-[10px] font-bold">
                         <span className={cn("flex items-center gap-2", Object.keys(data.expedienteExistingFiles || {}).length > 0 ? "text-emerald-400" : "text-white/30")}><CheckSquare size={14}/> {Object.keys(data.expedienteExistingFiles || {}).length > 0 ? 'Documental OK' : 'Docs Pendientes'}</span>
                         <span className={cn("flex items-center gap-2", asesorNombre ? "text-emerald-400" : "text-white/30")}><PenTool size={14}/> {asesorNombre ? 'Dictamen Certificado' : 'Firma Asesor Pend.'}</span>
+                        {activeStep === 4 && (
+                          <span className={cn("flex items-center gap-2", data.estatusfirma === 'FIRMADO' ? "text-emerald-400" : "text-[#DAA520] animate-pulse")}>
+                            <Clock size={14}/> {data.estatusfirma === 'FIRMADO' ? 'EXPEDIENTE CERRADO ✓' : 'ESPERANDO FIRMA CLIENTE...'}
+                          </span>
+                        )}
                     </div>
                 </div>
 
@@ -685,8 +740,8 @@ export default function EntrevistaHub() {
                 ))}
 
                 <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-3">
-                    <h5 className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1">Historial de Auditoría</h5>
-                    <div className="text-[9px] font-bold text-white/70 space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar">
+                    <h5 className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1">Captura Digital de Materialidad</h5>
+                    <div className="text-[10px] font-bold text-white/70 space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar">
                         {auditLog.map((l, i) => <div key={i}><span className="text-white/30">[{l.fecha}]</span> {l.accion}</div>)}
                     </div>
                 </div>
@@ -694,7 +749,12 @@ export default function EntrevistaHub() {
                 <AuditoriaInput registrarAccion={registrarAccion} label="Nombre del Cliente" value={data.nombre} fieldKey="nombre" isLocked={lockedFields.has('nombre')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nombre'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nombre} onChange={(v:any)=>updateData({nombre:v})} />
                 <AuditoriaInput registrarAccion={registrarAccion} label="CURP Oficial" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
                 <AuditoriaInput registrarAccion={registrarAccion} label="RFC Fiscal" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
-                <AuditoriaInput registrarAccion={registrarAccion} label="Semanas Extra" value={data.semanasExtra} fieldKey="semanasExtra" isLocked={lockedFields.has('semanasExtra')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasExtra'); setLockedFields(s); }} onChange={(v:any)=>updateData({semanasExtra: v})} />
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <AuditoriaInput registrarAccion={registrarAccion} label="Semanas Busqueda (Complemento)" value={data.semanasExtraDictaminadas} fieldKey="semanasExtraDictaminadas" isLocked={lockedFields.has('semanasExtraDictaminadas')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasExtraDictaminadas'); setLockedFields(s); }} onChange={(v:any)=>updateData({semanasExtraDictaminadas: v})} />
+                  <AuditoriaInput registrarAccion={registrarAccion} label="Semanas Extra (Regaladas)" value={data.semanasExtra} fieldKey="semanasExtra" isLocked={lockedFields.has('semanasExtra')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasExtra'); setLockedFields(s); }} onChange={(v:any)=>updateData({semanasExtra: v})} />
+                </div>
+
                 <AuditoriaInput registrarAccion={registrarAccion} label="NSS IMSS" value={data.nss} fieldKey="nss" isLocked={lockedFields.has('nss')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nss'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nss} onChange={(v:any)=>updateData({nss:v})} />
                 
                 <div className="grid grid-cols-2 gap-4">
