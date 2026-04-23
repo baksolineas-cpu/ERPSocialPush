@@ -208,72 +208,7 @@ export default function OnboardingExpress() {
       // 1. Generar ID Local (Estandarización CURP)
       const nuevoId = data.curp ? data.curp.substring(0, 10).toUpperCase() : "SINF-" + Math.floor(Math.random() * 10000);
       
-      // 2. Generar PDF Localmente (Contrato Marco)
-      let pdfBase64 = "";
-      if (contractPrintRef.current) {
-        const canvas = await html2canvas(contractPrintRef.current, {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#ffffff',
-          onclone: (clonedDoc) => {
-            const styleTags = clonedDoc.getElementsByTagName('style');
-            const colorFixRegex = /(oklch|oklab|light-dark|color-mix)\((?:[^)(]+|\([^)(]*\))*\)/g;
-            for (let i = 0; i < styleTags.length; i++) {
-              styleTags[i].innerHTML = styleTags[i].innerHTML.replace(colorFixRegex, '#737373');
-            }
-            // Eliminar fondos grises explícitamente en el clon
-            const allElements = clonedDoc.getElementsByTagName('*');
-            for (let i = 0; i < allElements.length; i++) {
-              const el = allElements[i] as HTMLElement;
-              if (el.className && typeof el.className === 'string') {
-                el.className = el.className.replace(/bg-(gray|slate|blue|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|indigo|violet|purple|fuchsia|pink|rose)-(50|100|200|300|400|500|600|700|800|900|950)/g, 'bg-white');
-              }
-            }
-            // Quitar estilos externos
-            const linkTags = clonedDoc.getElementsByTagName('link');
-            for (let i = linkTags.length - 1; i >= 0; i--) {
-              if (linkTags[i].rel === 'stylesheet') {
-                 linkTags[i].parentNode?.removeChild(linkTags[i]);
-              }
-            }
-          }
-        });
-        
-        const imgData = canvas.toDataURL('image/png');
-        const pdf = new jsPDF('p', 'mm', 'a4');
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pageHeight = pdf.internal.pageSize.getHeight();
-        
-        const topMargin = 20; 
-        const bottomMargin = 20;
-        const effectivePageHeight = pageHeight - (topMargin + bottomMargin);
-        
-        const imgProps = pdf.getImageProperties(imgData);
-        const imgHeightInPdf = (imgProps.height * pdfWidth) / imgProps.width;
-        
-        let heightLeft = imgHeightInPdf;
-        let position = 0;
-        let pageCount = 0;
-
-        while (heightLeft > 0) {
-          if (pageCount > 0) pdf.addPage();
-          
-          pdf.addImage(imgData, 'PNG', 0, -position + topMargin, pdfWidth, imgHeightInPdf, undefined, 'FAST');
-          
-          pdf.setFillColor(255, 255, 255);
-          pdf.rect(0, 0, pdfWidth, topMargin, 'F');
-          pdf.rect(0, pageHeight - bottomMargin, pdfWidth, bottomMargin, 'F');
-          
-          heightLeft -= effectivePageHeight;
-          position += effectivePageHeight;
-          pageCount++;
-        }
-
-        pdfBase64 = pdf.output('datauristring');
-      }
-
-      // 3. Empaquetado de Documentos Cargados (Mantener Data URI completo)
+      // 2. Empaquetado de Documentos Cargados (Mantener Data URI completo)
       const extraDocs = Object.entries(uploadedFiles).map(([type, dataUrl]) => {
         const nameMap: Record<string, string> = {
           ine: "INE",
@@ -285,13 +220,13 @@ export default function OnboardingExpress() {
         
         return {
           name: fileName,
-          content: dataUrl // Enviamos el Data URI completo (data:application/pdf;base64,...)
+          content: dataUrl 
         };
       });
 
-      // 4. Preparar Payload Único (CREATE_CLIENTE)
+      // 3. Preparar Payload Único (ONBOARDING_SYNC)
       const payload = {
-        action: "CREATE_CLIENTE",
+        action: "ONBOARDING_SYNC",
         userEmail: "onboarding@socialpush.com",
         payload: {
           ...data,
@@ -301,14 +236,11 @@ export default function OnboardingExpress() {
           onboardingPublico: true,
           selfieBase64: data.selfieBase64,
           firmaBase64: data.firmaBase64,
-          documentos: [
-            { name: "Contrato_Marco_Firmado.pdf", content: pdfBase64 },
-            ...extraDocs
-          ]
+          documentos: extraDocs // Ya no enviamos el Contrato_Marco_Firmado.pdf, el backend lo genera
         }
       };
 
-      // 5. Enviar al Webhook (Backend G.A.S.)
+      // 4. Enviar al Webhook (Backend G.A.S.)
       const response = await callGAS(payload.action, payload.payload, payload.userEmail);
       console.log("CONEXIÓN EXITOSA CON GAS:", response);
 
@@ -709,8 +641,8 @@ export default function OnboardingExpress() {
       <div className="fixed -left-[4000px] top-0 pointer-events-none">
         <div ref={contractPrintRef} className="w-[850px] bg-white p-16 font-serif text-[11px] leading-relaxed text-slate-900 space-y-6">
           {/* Header Corporativo */}
-          <div className="text-center border-b-2 border-navy pb-6 space-y-2">
-            <h1 className="text-3xl font-black text-navy italic tracking-tighter">BAKSO, S.C.</h1>
+          <div className="text-center border-b-2 border-navy pb-6 space-y-4 flex flex-col items-center">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB2aWV3Qm94PSIwIDAgNTAwIDE1MCI+PGRlZnM+PHN0eWxlPi5jbHMtMXtmaWxsOiMwMDMzNjY7fS5jbHMtMntmaWxsOiNkYWE1MjA7fS5jbHMtM3tmb250LWZhbWlseTonVGltZXMgTmV3IFJvbWFuJywgVGltZXMsIHNlcmlmO2ZvbnQtc2l6ZTo4MHB4O2ZvbnQtd2VpZ2h0OmJvbGQ7fTwvc3R5bGU+PC9kZWZzPjxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTEwMCw3NSBBNTAsNTAgMCAxLDEgMCw3NSBBNTAsNTAgMCAxLDEgMTAwLDc1Ii8+PHBhdGggY2xhc3M9ImNscy0yIiBkPSJNODEsNzUgQTMwLDMwIDAgMSwxIDIwLDc1IEEzMCwzMCAwIDEsMSA4MSw3NSIvPjx0ZXh0IGNsYXNzPSJjbHMtMSBjbHMtMyIgeD0iMTIwIiB5PSIxMDUiPkJBS1NPLCBTLkMuPC90ZXh0Pjwvc3ZnPg==" alt="BAKSO Logo" className="h-16 w-auto object-contain" />
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-slate-600">CONTRATO MARCO DE PRESTACIÓN DE SERVICIOS PROFESIONALES</p>
           </div>
 

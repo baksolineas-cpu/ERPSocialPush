@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MessageSquare, Send, X, Bot, User, Loader2, Sparkles } from 'lucide-react';
-import { getConsultorChatResponse } from '@/services/geminiService';
+import { getSidebarConsultantResponse } from '@/services/geminiService';
 import { cn } from '@/lib/utils';
 
 interface Message {
@@ -32,7 +32,7 @@ export default function AISidebar({ context }: { context: any }) {
 
     try {
       const history = messages.concat(userMessage);
-      const response = await getConsultorChatResponse(history, context);
+      const response = await getSidebarConsultantResponse(history, context);
       setMessages(prev => [...prev, { role: 'model', parts: [{ text: response || '' }] }]);
     } catch (error) {
       console.error("Error chat:", error);

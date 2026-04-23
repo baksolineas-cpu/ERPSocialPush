@@ -60,6 +60,8 @@ export interface Cliente {
   comprobante_url?: string;
   comprobanteDomicilioUrl?: string;
   domicilioExtraido?: string;
+  domicilio?: string;
+  codigoPostal?: string;
   estatusAuditoria?: string;
   estatusfirma?: string;
   statusSignature?: string;

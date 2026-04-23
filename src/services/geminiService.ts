@@ -45,6 +45,17 @@ No inventes datos. Devuelve SOLO el bloque JSON validado.`;
       promptText = `Analiza este documento complementario de Seguridad Social (México). 
       1. Determina si es una 'Hoja Rosa' o una 'Resolución de Búsqueda de Semanas'.
       Devuelve SOLO JSON puro con llaves: "tipo_complemento" ('Hoja Rosa', 'Resolución', 'Ninguno'), "semanas_extra" (número), "notas_auditoria" (breve descripción técnica).`;
+  } else if (docType === 'CSF' || docType === 'Constancia de Situación Fiscal') {
+      promptText = `Analiza esta Constancia de Situación Fiscal (SAT México).
+      Extrae rigurosamente la siguiente información en JSON puro (sin formato markdown):
+      - "rfc": RFC con homoclave.
+      - "curp": CURP.
+      - "nombre": Nombre completo, denominación o razón social.
+      - "regimenFiscal": Lista de regímenes fiscales o el principal.
+      - "domicilio": Calle, número exterior, interior, colonia, municipio, entidad federativa.
+      - "codigoPostal": El Código Postal MIDE EXACTAMENTE 5 DÍGITOS numéricos. Búscalo bajo el título "Datos del domicilio registrado", generalmente junto a la etiqueta "Código Postal:". 
+      Devuelve SOLO los 5 dígitos numéricos. Ejemplo de salida esperada: {"rfc": "...", "curp": "...", "nombre": "...", "regimenFiscal": "...", "domicilio": "...", "codigoPostal": "53300"}. 
+      Si no lo encuentras, devuelve "". No omitas esta clave.`;
   }
 
   let result;
@@ -66,7 +77,7 @@ No inventes datos. Devuelve SOLO el bloque JSON validado.`;
     });
   } catch (error: any) {
     if (error?.status === 429 || error?.message?.includes("exceeded your current quota") || error?.message?.includes("RESOURCE_EXHAUSTED")) {
-      throw new Error("Cuota de IA excedida. Has alcanzado el límite del plan gratuito o facturación. Intenta más tarde.");
+      throw new Error("⚠️ Cuota de IA excedida. Has alcanzado el límite de uso actual. Por favor, intenta de nuevo más tarde o procede con la captura manual de los datos.");
     }
     throw error;
   }
@@ -85,6 +96,7 @@ No inventes datos. Devuelve SOLO el bloque JSON validado.`;
     ultimoSalario: parseFloat(String(parsed.ultimoSalario || 0).replace(/[^0-9.]/g, '')) || 0,
     regimenFiscal: String(parsed.regimenFiscal || '').trim(),
     domicilio: String(parsed.domicilio || '').trim().replace(/[\n\r]/g, ' '),
+    codigoPostal: cleanNum(parsed.codigoPostal || parsed.cp).substring(0, 5) || '',
     tipo_complemento: parsed.tipo_complemento || 'Ninguno',
     semanas_extra: parseInt(cleanNum(parsed.semanas_extra)) || 0
   };
@@ -135,5 +147,60 @@ export async function getConsultorChatResponse(history: any[], context: any) {
       return "Hubo un error al generar el diagnóstico: Límite de Cuota de IA agotada. Por favor contacte con su administrador o revise la facturación.";
     }
     return `Error al generar el diagnóstico: ${error?.message || 'Error desconocido'}`;
+  }
+}
+
+/**
+ * Motor de Diálogo para el AISidebar (Consultor Técnico de Seguridad Social)
+ */
+export async function getSidebarConsultantResponse(history: any[], context: any) {
+  if (!ai) return "Error: La inteligencia artificial no está configurada.";
+  
+  // El AISidebar envía el historial completo (incluyendo el último mensaje del usuario).
+  // Separamos el historial "pasado" y el "mensaje actual".
+  const pastHistory = history.slice(0, -1).map(h => ({
+    role: h.role === 'user' ? 'user' : 'model',
+    parts: [{ text: h.parts[0].text }]
+  }));
+  const currentMessage = history[history.length - 1]?.parts[0]?.text || "Hola";
+
+  const systemPrompt = `
+    Eres un Consultor Técnico Senior experto en Seguridad Social Mexicana (IMSS, ISSSTE, Modalidad 40, Modalidad 10, AFORE).
+    Trabajas como el "Co-pilot" para los asesores de BAKSO S.C. (Social Push®).
+
+    TU MISIÓN: Asesorar, responder dudas técnicas, recomendar estrategias y sugerir los mejores servicios para el cliente actual en tiempo real. 
+    Actúa con un tono profesional, preciso y enfocado en la Ley 73 y Ley 97 del Seguro Social.
+    Sé conciso y directo en tus respuestas, no des explicaciones largas a menos que se te pidan.
+
+    CONTEXTO DEL CLIENTE ACTUAL:
+    - Nombre: ${context?.currentCase?.cliente?.nombre || 'Usuario Anónimo'}
+    - CURP: ${context?.currentCase?.cliente?.curp || 'No especificada'}
+    - Semanas Cotizadas reconocidas (IMSS): ${context?.currentCase?.cliente?.semanasCotizadas || 0}
+    - Semanas Extra aportadas / dictaminadas: ${context?.currentCase?.cliente?.semanasExtra || 0}
+    - Salario Diario / Cotización actual: ${context?.currentCase?.cliente?.ultimoSalario || 0}
+    - Régimen / Diagnóstico Fiscal: ${context?.currentCase?.cliente?.regimenFiscal || 'No especificado'}
+    - Edad: ${context?.currentCase?.cliente?.edad || 'No especificada'}
+    ${context?.currentCase?.diagnostico?.servicios?.length > 0 ? `- Servicios previstos para vender al cliente: ${context.currentCase.diagnostico.servicios.map((s:any) => s.nombre).join(', ')}` : ''}
+
+    INSTRUCCIONES:
+    - Evalúa las respuestas o dudas del asesor en el chat basándote puramente en la Seguridad Social Mexicana.
+    - Utiliza el CONTEXTO DEL CLIENTE ACTUAL para basar tus respuestas (ej. Si ves pocas semanas para una Ley 73, sugiere una Búsqueda de Semanas Cotizadas o Modalidad 10 para vigencia).
+    - Si el usuario te pide una recomendación general, lee los datos del contexto y dale un análisis exprés sobre si es candidato a Modalidad 40 o no.
+  `;
+
+  const chat = ai.chats.create({
+    model: "gemini-2.5-flash",
+    history: pastHistory,
+    config: { systemInstruction: systemPrompt, temperature: 0.5 }
+  });
+
+  try {
+    const result = await chat.sendMessage({ message: currentMessage });
+    return result.text;
+  } catch (error: any) {
+    if (error?.status === 429 || error?.message?.includes("exceeded your current quota") || error?.message?.includes("RESOURCE_EXHAUSTED")) {
+      return "Hubo un error al generar respuestas: Cuota de IA agotada. Reintente más tarde.";
+    }
+    return `Error en el asistente: ${error?.message || 'Error desconocido'}`;
   }
 }

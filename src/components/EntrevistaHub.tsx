@@ -13,6 +13,7 @@ import { cn, calculateDetailedAge, VALIDATORS, copyToClipboard } from '@/lib/uti
 import { getGASData, callGAS } from '@/services/apiService';
 import { extractDocumentData, getConsultorChatResponse } from '@/services/geminiService';
 import { Cliente } from '@/types';
+import { useCase } from './CaseContext';
 
   // --- SUB-COMPONENTE: INPUT DE AUDITORÍA PREMIUM ---
   function AuditoriaInput({ label, value, isLoading, isLocked, onUnlock, onChange, hasAlert, fieldKey, registrarAccion }: any) {
@@ -57,6 +58,7 @@ import { Cliente } from '@/types';
   }
 
 export default function EntrevistaHub() {
+  const { setCurrentCase } = useCase();
   const [activeStep, setActiveStep] = useState(1);
   const [curpSearch, setCurpSearch] = useState('');
   const [nameSearch, setNameSearch] = useState('');
@@ -71,11 +73,23 @@ export default function EntrevistaHub() {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [filePreviews, setFilePreviews] = useState<Record<string, string>>({});
   const [ocrSummaries, setOcrSummaries] = useState<Record<string, any>>({});
+  const [clienteStatus, setClienteStatus] = useState<'idle' | 'loading' | 'verified' | 'not_found'>('idle');
   
-  const activeUploadRef = useRef<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const sigCanvasAsesor = useRef<SignatureCanvas>(null);
-
+  const renderStatusBanner = () => (
+    <div className={cn("mb-6 p-4 rounded-2xl border flex items-center gap-3 text-sm font-bold",
+        clienteStatus === 'loading' ? "bg-blue-50 border-blue-200 text-blue-700" :
+        clienteStatus === 'verified' ? "bg-emerald-50 border-emerald-200 text-emerald-700" :
+        "bg-amber-50 border-amber-200 text-amber-700"
+    )}>
+        {clienteStatus === 'loading' && <Loader2 size={18} className="animate-spin" />}
+        {clienteStatus === 'verified' && <ShieldCheck size={18} />}
+        {clienteStatus === 'not_found' && <AlertTriangle size={18} />}
+        {clienteStatus === 'loading' ? 'Verificando cliente en Bóveda...' : 
+         clienteStatus === 'verified' ? 'Cliente validado y activo en el sistema.' : 
+         'Cliente no encontrado en sistema. Procediendo como nuevo ingreso.'}
+    </div>
+  );
+  
   const [data, setData] = useState<Partial<Cliente>>({
     estatusfirma: 'PENDIENTE',
     expedienteExistingFiles: {},
@@ -93,14 +107,55 @@ export default function EntrevistaHub() {
       discrepancias: [] 
     }
   });
+  
+  useEffect(() => {
+    const checkStatus = async () => {
+        if ((data.curp || data.id) && clienteStatus === 'idle') {
+            setClienteStatus('loading');
+            try {
+                const res = await callGAS('GET_CLIENTE_STATUS', { curp: data.curp, id: data.id });
+                if (res?.status === 'success') {
+                    setClienteStatus('verified');
+                    updateData({ ...data, ...res.data });
+                } else {
+                    setClienteStatus('not_found');
+                }
+            } catch (e) {
+                setClienteStatus('not_found');
+            }
+        }
+    };
+    checkStatus();
+  }, [data.curp, data.id]);
 
-  const [hojaServicio, setHojaServicio] = useState({
+
+  const [hojaServicio, setHojaServicio] = useState<{
+    servicios: { nombre: string; universo: 'U1' | 'U2'; precio: number }[];
+    universo: 'U1' | 'U2';
+    otroServicioTexto: string;
+    honorariosAcordados: number;
+    notasDiagnostico: string;
+  }>({
+    servicios: [],
     universo: 'U1',
-    servicios: [] as string[],
     otroServicioTexto: '',
     honorariosAcordados: 0,
     notasDiagnostico: ''
   });
+
+  const CATALOGO_SERVICIOS = [
+    'Asesoría Inicial (Diagnóstico Integral)',
+    'Proyección Básica de Pensión (3 escenarios)',
+    'Proyección Avanzada de Pensión (5 escenarios)',
+    'Inscripción a Modalidad 40',
+    'Gestión de Línea de Captura M40',
+    'Unificación de NSS / Corrección de Datos',
+    'Búsqueda Manual de Semanas',
+    'Gestoría de Pensión IMSS (Trámite)',
+    'Inscripción PTI (Modalidad 10)',
+    'Recuperación de Recursos AFORE',
+    'Financiamiento M40 Retroactivo'
+  ];
 
   const [iaContext, setIaContext] = useState('');
   const [isAiDrafting, setIsAiDrafting] = useState(false);
@@ -110,6 +165,10 @@ export default function EntrevistaHub() {
   const [auditLog, setAuditLog] = useState<{fecha: string, accion: string}[]>([]);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const [toasts, setToasts] = useState<{id: number, message: string, type: 'info' | 'error' | 'success'}[]>([]);
+  
+  const activeUploadRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const sigCanvasAsesor = useRef<SignatureCanvas>(null);
 
   const addToast = (message: string, type: 'info' | 'error' | 'success' = 'info') => {
     const id = Date.now();
@@ -154,6 +213,13 @@ export default function EntrevistaHub() {
     };
   }, [activeStep, data.id, data.estatusfirma]);
 
+  useEffect(() => {
+    setCurrentCase({
+      cliente: data,
+      diagnostico: hojaServicio
+    });
+  }, [data, hojaServicio, setCurrentCase]);
+
   const registrarAccion = (texto: string) => setAuditLog(prev => [{fecha: new Date().toLocaleTimeString(), accion: texto}, ...prev]);
 
   const updateData = (newData: Partial<Cliente>) => {
@@ -196,26 +262,42 @@ export default function EntrevistaHub() {
 
   const handleSearch = async () => {
     const cleanCurp = curpSearch.toUpperCase().replace(/\s+/g, '').trim();
+    if (!cleanCurp && !nameSearch) return; // Validación básica
+    
     setIsSearching(true);
     setSearchPerformed(true);
+    
     try {
+      // 1. Búsqueda rápida por CURP/ID (Prioridad alta)
       if (cleanCurp.length >= 10) {
         const res = await getGASData('GET_CLIENTE_STATUS', { curp: cleanCurp });
         const c = res?.data || res?.cliente;
-        if (c) { setFoundClients([c]); return; }
+        if (c) { setFoundClients([c]); setIsSearching(false); return; }
       }
+
+      // 2. Búsqueda filtrada (Solo si no hubo match por CURP y el nombre tiene al menos 3 letras)
+      if (nameSearch.length < 3) {
+        addToast("Ingresa al menos 3 letras para buscar por nombre.", "info");
+        setFoundClients([]);
+        setIsSearching(false);
+        return;
+      }
+
       const res = await getGASData('GET_DATA', { sheetName: 'CLIENTES' });
       const list = res?.data || [];
       const normalize = (s: string) => s?.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() || "";
-      const queryTokens = normalize(nameSearch).split(/\s+/);
+      const queryTokens = normalize(nameSearch).split(/\s+/).filter(t => t.length > 0);
       
+      // Filtrado optimizado: break temprano si no matchea
       setFoundClients(list.filter((c: any) => {
         const full = normalize(`${c.nombre || ''} ${c.apellidos || ''}`);
-        const matchesName = queryTokens.every(token => full.includes(token));
-        const matchesCurp = cleanCurp ? (c.curp?.includes(cleanCurp) || c.id?.includes(cleanCurp)) : true;
-        return matchesName && matchesCurp;
+        return queryTokens.every(token => full.includes(token));
       }));
-    } finally { setIsSearching(false); }
+    } catch (e) {
+      addToast("Error al buscar. Reintenta.", "error");
+    } finally { 
+      setIsSearching(false); 
+    }
   };
 
   const handleNewClient = () => {
@@ -292,6 +374,9 @@ export default function EntrevistaHub() {
           if (extracted.curp && extracted.curp.length === 18) { updatePayload.curp = extracted.curp; newLocked.add('curp'); }
           if (extracted.nombre && !data.nombre) { updatePayload.nombre = extracted.nombre; newLocked.add('nombre'); }
           if (extracted.regimenFiscal) { updatePayload.regimenFiscal = extracted.regimenFiscal; newLocked.add('regimenFiscal'); }
+          if (extracted.codigoPostal) { updatePayload.codigoPostal = extracted.codigoPostal; newLocked.add('codigoPostal'); }
+          if (extracted.domicilio) { updatePayload.domicilio = extracted.domicilio; newLocked.add('domicilio'); }
+          
           registrarAccion(`Constancia Fiscal procesada vía OCR.`);
           addToast("CSF validada correctamente", 'success');
         } else if (type === 'semanas') {
@@ -311,13 +396,19 @@ export default function EntrevistaHub() {
             nuevasAlertas.push(msg);
             addToast("Hoja Rosa Detectada", 'info');
           }
-          updatePayload.metadatosAuditoria = { ...data.metadatosAuditoria, alertas: nuevasAlertas } as any;
-          if (extracted.tipo_complemento === 'Resolución' && extracted.semanas_extra > 0) {
+          
+          if (extracted.semanas_extra > 0) {
+            updatePayload.semanasExtra = (data.semanasExtra || 0) + extracted.semanas_extra;
             updatePayload.semanasExtraDictaminadas = extracted.semanas_extra;
+            newLocked.add('semanasExtra');
             newLocked.add('semanasExtraDictaminadas');
-            addToast(`Resolución: ${extracted.semanas_extra} semanas extra`, 'success');
+            const msg = `✅ ${extracted.semanas_extra} semanas extra encontradas.`;
+            nuevasAlertas.push(msg);
+            addToast(msg, 'success');
           }
-          registrarAccion(`Doc Complementario procesado: ${extracted.tipo_complemento}`);
+
+          updatePayload.metadatosAuditoria = { ...data.metadatosAuditoria, alertas: nuevasAlertas } as any;
+          registrarAccion(`Doc Complementario procesado: ${extracted.tipo_complemento}. ${extracted.semanas_extra > 0 ? extracted.semanas_extra + ' semanas encontradas.' : ''}`);
         } else {
           // Fallback para otros documentos
            Object.assign(updatePayload, extracted);
@@ -361,6 +452,15 @@ export default function EntrevistaHub() {
   };
 
   const handleSiguientePasoDocs = async () => {
+      if (!data.whatsapp || data.whatsapp.length < 10) {
+        addToast("El número de WhatsApp es obligatorio (mínimo 10 dígitos).", 'error');
+        return;
+      }
+      if (!data.email || !data.email.includes('@')) {
+        addToast("El correo electrónico es obligatorio y debe ser válido.", 'error');
+        return;
+      }
+
     if (data.id?.startsWith('NEW_')) {
       if (!data.nombre) {
         addToast("El nombre del cliente es obligatorio.", 'error');
@@ -438,10 +538,13 @@ export default function EntrevistaHub() {
     
     setIsProcessing(true);
     const firmaAsesor = sigCanvasAsesor.current?.getTrimmedCanvas().toDataURL('image/png');
-    const serviciosFinales = [...hojaServicio.servicios];
+    const serviciosFinales = hojaServicio.servicios.map(s => s.nombre);
     if (hojaServicio.otroServicioTexto) serviciosFinales.push(hojaServicio.otroServicioTexto);
 
     try {
+      const yaTieneContrato = data.contrato_url && data.contrato_url.length > 5;
+      const tipoDocEval = yaTieneContrato ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
+
       console.log("DATA_DEBUG", "Payload enviado a FINALIZE_AUDIT:", data);
       const res = await callGAS('FINALIZE_AUDIT', {
         ...data,
@@ -450,7 +553,8 @@ export default function EntrevistaHub() {
         dictamen: hojaServicio.notasDiagnostico,
         servicios: serviciosFinales.join(', '),
         monto: hojaServicio.honorariosAcordados,
-        auditLog: JSON.stringify(auditLog)
+        auditLog: JSON.stringify(auditLog),
+        tipoDocEval // Send eval rule directly to backend
       });
 
       if (res?.success) {
@@ -459,15 +563,30 @@ export default function EntrevistaHub() {
             setData(prev => ({ ...prev, id: realId, id_carpeta_drive: res.id_carpeta_drive || data.id_carpeta_drive }));
          }
 
-         const yaTieneContrato = data.contratourl && data.contratourl.length > 5;
-         const tipoDoc = yaTieneContrato ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
+         const tipoDoc = tipoDocEval;
          
          const baseUrl = window.location.origin;
          const link = `${baseUrl}/firma-externa/${realId}?tipoDoc=${tipoDoc}`;
          setFinalLink(link);
          setCertificationReady(true);
-         addToast("Expediente sellado y sellos generados ✓", 'success');
-         registrarAccion(`Expediente Certificado. Preparado para envío (${tipoDoc}).`);
+
+         if (yaTieneContrato) {
+           // Omitir envío de WhatsApp/Firma externa si ya tiene el contrato original (Ej. Onboarding).
+           // Se estampa directamente el diagnóstico (con la firma del asesor por detrás) y terminamos.
+           addToast("Diagnóstico sellado automáticamente. Identidad previamente verificada.", 'success');
+           updateData({ estatusfirma: 'COMPLETADO' });
+           registrarAccion(`Expediente Finalizado (Diagnóstico). Contrato e Identidad heredados.`);
+         } else {
+           addToast("Expediente sellado y sellos generados ✓", 'success');
+           registrarAccion(`Expediente Certificado. Preparado para envío (${tipoDoc}).`);
+
+           // Disparar WhatsApp automáticamente si hay número
+           if (data.whatsapp) {
+             setTimeout(() => {
+               handleEnviarNotificacion('whatsapp', link);
+             }, 500);
+           }
+         }
       } else {
          addToast("La certificación falló", 'error');
       }
@@ -476,10 +595,11 @@ export default function EntrevistaHub() {
     } finally { setIsProcessing(false); }
   };
 
-  const handleEnviarNotificacion = (method: 'whatsapp' | 'email') => {
-    const yaTieneContrato = data.contratourl && data.contratourl.length > 5;
+  const handleEnviarNotificacion = (method: 'whatsapp' | 'email', overrideLink?: string) => {
+    const yaTieneContrato = data.contrato_url && data.contrato_url.length > 5;
     const tipoDoc = yaTieneContrato ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
-    const mensaje = `Hola ${data.nombre || 'Cliente'}, soy ${asesorNombre} de Social Push®. Hemos generado tu ${yaTieneContrato ? 'Hoja de Diagnóstico' : 'Contrato y Diagnóstico'} técnico. Por favor, revísalo y fírmalo aquí: ${finalLink}`;
+    const linkAEnviar = overrideLink || finalLink;
+    const mensaje = `Hola ${data.nombre || 'Cliente'}, soy ${asesorNombre} de Social Push®. Hemos generado tu ${yaTieneContrato ? 'Hoja de Diagnóstico' : 'Contrato y Diagnóstico'} técnico. Por favor, revísalo y fírmalo aquí: ${linkAEnviar}`;
 
     if (method === 'whatsapp') {
        const phone = (data.whatsapp || '').toString().replace(/\D/g, '');
@@ -542,6 +662,7 @@ export default function EntrevistaHub() {
 
         {activeStep === 2 && (
           <div className="space-y-8 animate-in fade-in">
+            {renderStatusBanner()}
             <div className="bg-white p-10 rounded-[48px] shadow-2xl border border-slate-100 space-y-8">
                 <div className="flex items-center gap-4 border-b border-slate-100 pb-6"><FileSearch size={28} className="text-[#003366]"/><h3 className="text-2xl font-black text-[#003366] uppercase">1. Digitalización Segura</h3></div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -596,6 +717,14 @@ export default function EntrevistaHub() {
                                       {ocrSummaries[doc.id].nombre && <div className="flex justify-between items-center"><span className="text-[7px] font-bold text-slate-400 uppercase">Nombre:</span><span className="text-[8px] font-black uppercase text-slate-600 truncate ml-2 max-w-[120px]">{ocrSummaries[doc.id].nombre}</span></div>}
                                       {ocrSummaries[doc.id].curp && <div className="flex justify-between items-center"><span className="text-[7px] font-bold text-slate-400 uppercase">CURP:</span><span className="text-[8px] font-mono font-bold text-[#003366]">{ocrSummaries[doc.id].curp}</span></div>}
                                       {ocrSummaries[doc.id].rfc && <div className="flex justify-between items-center"><span className="text-[7px] font-bold text-slate-400 uppercase">RFC:</span><span className="text-[8px] font-mono font-bold text-[#003366]">{ocrSummaries[doc.id].rfc}</span></div>}
+                                      {(ocrSummaries[doc.id].codigoPostal || ocrSummaries[doc.id].codigo_postal || ocrSummaries[doc.id].cp) && (
+                                        <div className="flex justify-between items-center">
+                                          <span className="text-[7px] font-bold text-slate-400 uppercase">C.P.:</span>
+                                          <span className="text-[8px] font-mono font-bold text-[#003366]">
+                                            {ocrSummaries[doc.id].codigoPostal || ocrSummaries[doc.id].codigo_postal || ocrSummaries[doc.id].cp}
+                                          </span>
+                                        </div>
+                                      )}
                                       {ocrSummaries[doc.id].nss && <div className="flex justify-between items-center"><span className="text-[7px] font-bold text-slate-400 uppercase">NSS:</span><span className="text-[8px] font-mono font-bold text-[#003366]">{ocrSummaries[doc.id].nss}</span></div>}
                                       {ocrSummaries[doc.id].semanasCotizadas > 0 && <div className="flex justify-between items-center"><span className="text-[7px] font-bold text-slate-400 uppercase">Semanas:</span><span className="text-[8px] font-black text-emerald-600">{ocrSummaries[doc.id].semanasCotizadas}</span></div>}
                                    </div>
@@ -636,71 +765,138 @@ export default function EntrevistaHub() {
                         <div className="space-y-3">
                             <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Catálogo de Servicios</label>
                             <div className="grid grid-cols-1 gap-2">
-                                {[
-                                    'Asesoría Inicial (Diagnóstico Integral)',
-                                    'Proyección Básica de Pensión (3 escenarios)',
-                                    'Proyección Avanzada de Pensión (5 escenarios)',
-                                    'Inscripción a Modalidad 40',
-                                    'Gestión de Línea de Captura M40',
-                                    'Unificación de NSS / Corrección de Datos',
-                                    'Búsqueda Manual de Semanas',
-                                    'Gestoría de Pensión IMSS (Trámite)',
-                                    'Inscripción PTI (Modalidad 10)',
-                                    'Recuperación de Recursos AFORE',
-                                    'Financiamiento M40 Retroactivo'
-                                ].map(srv => (
-                                    <label key={srv} className={cn("flex items-center justify-between p-4 border rounded-2xl cursor-pointer transition-all", hojaServicio.servicios.includes(srv) ? "bg-[#003366] border-[#003366] text-white" : "bg-slate-50 border-slate-100 hover:bg-slate-100")}>
-                                        <div className="flex items-center gap-3">
-                                            <input type="checkbox" checked={hojaServicio.servicios.includes(srv)} onChange={(e) => setHojaServicio({...hojaServicio, servicios: e.target.checked ? [...hojaServicio.servicios, srv] : hojaServicio.servicios.filter(s => s !== srv)})} className="hidden"/>
-                                            <span className="text-xs font-bold">{srv}</span>
+                                {CATALOGO_SERVICIOS.map(srv => {
+                                    const selectedService = hojaServicio.servicios.find(s => s.nombre === srv);
+                                    const isSelected = !!selectedService;
+                                    return (
+                                        <div key={srv} className={cn("p-4 border rounded-2xl transition-all space-y-3", isSelected ? "bg-[#003366]/5 border-[#003366]/20" : "bg-slate-50 border-slate-100 hover:bg-slate-100")}>
+                                            <label className="flex items-center justify-between cursor-pointer">
+                                                <div className="flex items-center gap-3">
+                                                    <input type="checkbox" checked={isSelected} onChange={(e) => {
+                                                        const updated = e.target.checked 
+                                                            ? [...hojaServicio.servicios, { nombre: srv, universo: 'U1' as const, precio: 0 }]
+                                                            : hojaServicio.servicios.filter(s => s.nombre !== srv);
+                                                        const total = updated.reduce((sum, s) => sum + s.precio, 0);
+                                                        setHojaServicio(prev => ({...prev, servicios: updated, honorariosAcordados: total}));
+                                                    }} className="hidden"/>
+                                                    <span className={cn("text-xs font-bold", isSelected && "text-[#003366]")}>{srv}</span>
+                                                </div>
+                                                {isSelected && <CheckCircle2 size={16} className="text-[#DAA520]" />}
+                                            </label>
+                                            
+                                            {/* Sub-form if selected */}
+                                            <AnimatePresence>
+                                              {isSelected && (
+                                                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="flex gap-2 items-center pt-2 overflow-hidden">
+                                                    <select 
+                                                      className="p-2 bg-white border border-slate-200 rounded-lg text-[10px] font-black uppercase text-slate-600 outline-none focus:border-[#003366] shadow-sm"
+                                                      value={selectedService.universo}
+                                                      onChange={(e) => {
+                                                          const updated = [...hojaServicio.servicios];
+                                                          const idx = updated.findIndex(s => s.nombre === srv);
+                                                          if(idx>=0) updated[idx].universo = e.target.value as 'U1' | 'U2';
+                                                          setHojaServicio({...hojaServicio, servicios: updated});
+                                                      }}
+                                                    >
+                                                      <option value="U1">U1 (única vez)</option>
+                                                      <option value="U2">U2 (recurrente)</option>
+                                                    </select>
+                                                    <div className="relative flex-1">
+                                                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
+                                                      <input 
+                                                        type="number"
+                                                        placeholder="Honorario..."
+                                                        className="w-full p-2 pl-6 bg-white border border-slate-200 rounded-lg text-xs font-bold text-[#003366] outline-none focus:border-[#DAA520] shadow-sm"
+                                                        value={selectedService.precio || ''}
+                                                        onChange={(e) => {
+                                                            const price = Number(e.target.value);
+                                                            const updated = [...hojaServicio.servicios];
+                                                            const idx = updated.findIndex(s => s.nombre === srv);
+                                                            if(idx>=0) updated[idx].precio = price;
+                                                            const total = updated.reduce((sum, s) => sum + s.precio, 0);
+                                                            setHojaServicio({...hojaServicio, servicios: updated, honorariosAcordados: total});
+                                                        }}
+                                                      />
+                                                    </div>
+                                                </motion.div>
+                                              )}
+                                            </AnimatePresence>
                                         </div>
-                                        {hojaServicio.servicios.includes(srv) && <CheckCircle2 size={16} className="text-[#DAA520]" />}
-                                    </label>
-                                ))}
+                                    );
+                                })}
                                 <div className="space-y-4 pt-4 border-t border-slate-100">
                                     <div className="flex justify-between items-center bg-slate-50 p-2 rounded-xl">
-                                      <label className="text-[9px] font-black uppercase text-slate-400 px-2">Servicios Personalizados</label>
+                                      <label className="text-[9px] font-black uppercase text-slate-400 px-2">Otros Servicios</label>
                                       <button 
                                         type="button" 
-                                        onClick={() => setHojaServicio({...hojaServicio, servicios: [...hojaServicio.servicios, ""]})}
+                                        onClick={() => setHojaServicio({...hojaServicio, servicios: [...hojaServicio.servicios, { nombre: 'Otro', universo: 'U1', precio: 0 }]})}
                                         className="bg-[#DAA520] text-[#003366] px-3 py-1 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 hover:bg-[#c9961d] transition-all"
                                       >
                                         <PlusCircle size={10}/> AGREGAR OTRO
                                       </button>
                                     </div>
                                     
-                                    {hojaServicio.servicios.filter(s => !['Proyección de Pensión', 'Cálculo de Semanas', 'Alta Modalidad 40', 'Alta PTI (Mod 10)', 'Juicio de Unificación', 'Asesoría Única'].includes(s)).map((srv, idx) => (
-                                      <div key={`custom-srv-${idx}`} className="flex gap-2 items-center group animate-in slide-in-from-left duration-300">
-                                        <div className="flex-1 relative">
-                                          <input 
-                                            type="text" 
-                                            value={srv} 
-                                            onChange={(e) => {
-                                              const newSrvs = [...hojaServicio.servicios];
-                                              const actualIdx = hojaServicio.servicios.indexOf(srv);
-                                              if (actualIdx !== -1) {
-                                                newSrvs[actualIdx] = e.target.value;
-                                                setHojaServicio({...hojaServicio, servicios: newSrvs});
-                                              }
-                                            }} 
-                                            placeholder="Nombre del servicio..." 
-                                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-[#003366] shadow-sm"
-                                          />
+                                    {hojaServicio.servicios.map((srv, idx) => {
+                                      if (srv.nombre !== 'Otro' && CATALOGO_SERVICIOS.includes(srv.nombre)) return null; // Standard services are rendered above
+                                      return (
+                                        <div key={`custom-srv-${idx}`} className="flex gap-2 items-center group animate-in slide-in-from-left duration-300">
+                                          <div className="flex-1 relative flex gap-2">
+                                            <input 
+                                              type="text" 
+                                              placeholder="Nombre del servicio..." 
+                                              className="flex-1 p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-[#003366] shadow-sm"
+                                              value={srv.nombre === 'Otro' ? '' : srv.nombre}
+                                              onChange={(e) => {
+                                                  const updated = [...hojaServicio.servicios];
+                                                  updated[idx].nombre = e.target.value || 'Otro';
+                                                  setHojaServicio({...hojaServicio, servicios: updated});
+                                              }}
+                                            />
+                                            <select 
+                                              className="p-2 bg-white border border-slate-200 rounded-lg text-[10px] font-black uppercase text-slate-600 outline-none focus:border-[#003366] shadow-sm w-30"
+                                              value={srv.universo}
+                                              onChange={(e) => {
+                                                  const updated = [...hojaServicio.servicios];
+                                                  updated[idx].universo = e.target.value as 'U1' | 'U2';
+                                                  setHojaServicio({...hojaServicio, servicios: updated});
+                                              }}
+                                            >
+                                                <option value="U1">U1 (única vez)</option>
+                                                <option value="U2">U2 (recurrente)</option>
+                                            </select>
+                                            <input 
+                                              type="number" 
+                                              placeholder="Precio..." 
+                                              className="w-24 p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-[#003366] shadow-sm"
+                                              value={srv.precio || ''}
+                                              onChange={(e) => {
+                                                  const price = Number(e.target.value);
+                                                  const updated = [...hojaServicio.servicios];
+                                                  updated[idx].precio = price;
+                                                  const total = updated.reduce((sum, s) => sum + s.precio, 0);
+                                                  setHojaServicio({...hojaServicio, servicios: updated, honorariosAcordados: total});
+                                              }}
+                                            />
+                                            <button 
+                                              type="button" 
+                                              onClick={() => {
+                                                  const updated = hojaServicio.servicios.filter((_, i) => i !== idx);
+                                                  const total = updated.reduce((sum, s) => sum + s.precio, 0);
+                                                  setHojaServicio({...hojaServicio, servicios: updated, honorariosAcordados: total});
+                                              }}
+                                              className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-colors"
+                                            >
+                                              <Trash2 size={16}/>
+                                            </button>
+                                          </div>
                                         </div>
-                                        <button 
-                                          type="button" 
-                                          onClick={() => setHojaServicio({...hojaServicio, servicios: hojaServicio.servicios.filter((_, i) => i !== hojaServicio.servicios.indexOf(srv))})}
-                                          className="p-2.5 bg-red-50 text-red-400 hover:bg-red-500 hover:text-white rounded-xl transition-all"
-                                        >
-                                          <Trash2 size={14}/>
-                                        </button>
-                                      </div>
-                                    ))}
+                                      );
+                                    })}
 
                                     <textarea 
                                       value={hojaServicio.otroServicioTexto} 
                                       onChange={(e) => setHojaServicio({...hojaServicio, otroServicioTexto: e.target.value})} 
-                                      placeholder="Especificar servicios especiales o notas adicionales..." 
+                                      placeholder="Notas adicionales sobre servicios especiales..." 
                                       className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-[#003366] shadow-inner min-h-[80px]"
                                     />
                                 </div>
@@ -709,18 +905,18 @@ export default function EntrevistaHub() {
                         <div className="space-y-4 p-6 bg-[#003366] rounded-[32px] border border-white/10 shadow-2xl">
                             <label className="text-[10px] font-black uppercase text-[#DAA520] tracking-widest text-center block">Propuesta Económica y Recurrencia</label>
                             <div className="grid grid-cols-2 gap-3 mb-4">
-                                <button onClick={() => setHojaServicio({...hojaServicio, universo: 'U1'})} className={cn("p-4 border-2 rounded-2xl font-black text-[10px] uppercase transition-all flex flex-col items-center gap-1", hojaServicio.universo === 'U1' ? "border-[#DAA520] bg-[#DAA520] text-[#003366]" : "bg-white/5 text-white/40 border-white/10")}>
+                                <button onClick={() => setHojaServicio(prev => ({...prev, universo: 'U1'}))} className={cn("p-4 border-2 rounded-2xl font-black text-[10px] uppercase transition-all flex flex-col items-center gap-1", hojaServicio.universo === 'U1' ? "border-[#DAA520] bg-[#DAA520] text-[#003366]" : "bg-white/5 text-white/40 border-white/10")}>
                                     <span>U1</span>
                                     <span className="text-[8px] opacity-70">Única Vez</span>
                                 </button>
-                                <button onClick={() => setHojaServicio({...hojaServicio, universo: 'U2'})} className={cn("p-4 border-2 rounded-2xl font-black text-[10px] uppercase transition-all flex flex-col items-center gap-1", hojaServicio.universo === 'U2' ? "border-[#DAA520] bg-[#DAA520] text-[#003366]" : "bg-white/5 text-white/40 border-white/10")}>
+                                <button onClick={() => setHojaServicio(prev => ({...prev, universo: 'U2'}))} className={cn("p-4 border-2 rounded-2xl font-black text-[10px] uppercase transition-all flex flex-col items-center gap-1", hojaServicio.universo === 'U2' ? "border-[#DAA520] bg-[#DAA520] text-[#003366]" : "bg-white/5 text-white/40 border-white/10")}>
                                     <span>U2</span>
                                     <span className="text-[8px] opacity-70">Recurrente</span>
                                 </button>
                             </div>
                             <div className="relative">
                                 <span className="absolute left-5 top-1/2 -translate-y-1/2 text-[#DAA520] font-black text-xl">$</span>
-                                <input type="number" value={hojaServicio.honorariosAcordados || ''} onChange={(e) => setHojaServicio({...hojaServicio, honorariosAcordados: Number(e.target.value)})} placeholder="0.00" className="w-full pl-10 p-5 bg-white/10 border border-white/10 rounded-2xl font-black text-2xl text-white focus:border-[#DAA520] outline-none shadow-inner"/>
+                                <input type="number" value={hojaServicio.honorariosAcordados || ''} onChange={(e) => setHojaServicio(prev => ({...prev, honorariosAcordados: Number(e.target.value)}))} placeholder="0.00" className="w-full pl-10 p-5 bg-white/10 border border-white/10 rounded-2xl font-black text-2xl text-white focus:border-[#DAA520] outline-none shadow-inner"/>
                             </div>
                         </div>
                     </div>
@@ -732,7 +928,7 @@ export default function EntrevistaHub() {
                             </button>
                         </div>
                         <textarea value={iaContext} onChange={(e) => setIaContext(e.target.value)} className="w-full bg-slate-800 text-white text-xs p-4 rounded-2xl mb-4 h-28 outline-none border border-slate-700" placeholder="Instrucciones para Gemini (Ej: El cliente quiere invertir 2 años en M40...)"/>
-                        <textarea value={hojaServicio.notasDiagnostico} onChange={(e) => setHojaServicio({...hojaServicio, notasDiagnostico: e.target.value})} className="flex-1 w-full bg-slate-800 text-emerald-50 border border-slate-700 rounded-2xl p-4 text-sm font-medium leading-relaxed outline-none focus:border-emerald-500 resize-none custom-scrollbar" placeholder="El dictamen técnico final aparecerá aquí..."/>
+                        <textarea value={hojaServicio.notasDiagnostico} onChange={(e) => setHojaServicio(prev => ({...prev, notasDiagnostico: e.target.value}))} className="flex-1 w-full bg-slate-800 text-emerald-50 border border-slate-700 rounded-2xl p-4 text-sm font-medium leading-relaxed outline-none focus:border-emerald-500 resize-none custom-scrollbar" placeholder="El dictamen técnico final aparecerá aquí..."/>
                     </div>
                 </div>
                 <button onClick={handleSiguientePasoDictamen} className="w-full py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl flex items-center justify-center gap-3">Previsualizar y Sellar Diagnóstico <ArrowRight /></button>
@@ -762,8 +958,8 @@ export default function EntrevistaHub() {
                    <div className="flex-1">
                       <h5 className="text-[10px] font-black uppercase tracking-widest text-[#DAA520] mb-3">Resumen Ejecutivo de Servicios</h5>
                       <div className="flex flex-wrap gap-2">
-                        {hojaServicio.servicios.map(s => (
-                          <span key={s} className="bg-white/10 px-4 py-1.5 rounded-full text-[10px] font-bold border border-white/10">{s}</span>
+                        {hojaServicio.servicios.map((s, idx) => (
+                          <span key={`${s.nombre}-${idx}`} className="bg-white/10 px-4 py-1.5 rounded-full text-[10px] font-bold border border-white/10">{s.nombre}</span>
                         ))}
                         {hojaServicio.otroServicioTexto && <span className="bg-[#DAA520] text-[#003366] px-4 py-1.5 rounded-full text-[10px] font-black">{hojaServicio.otroServicioTexto}</span>}
                       </div>
@@ -826,11 +1022,24 @@ export default function EntrevistaHub() {
                    </div>
                    <div className="space-y-4 flex flex-col justify-center">
                       <div className={cn("p-6 rounded-3xl border text-center space-y-6 transition-all", asesorNombre ? "bg-white" : "bg-slate-50 opacity-50")}>
-                         <p className="text-[9px] font-black text-[#003366] uppercase tracking-widest">Sellar Expediente y Enviar Firma Externa (Cliente)</p>
+                         {data.contrato_url && data.contrato_url.length > 5 ? (
+                            <>
+                               <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-4 rounded-xl flex items-center justify-center gap-3">
+                                  <ShieldCheck size={24} />
+                                  <div className="text-left">
+                                     <p className="text-[10px] font-black uppercase tracking-widest">Identidad Validada en Bóveda</p>
+                                     <p className="text-[10px] leading-tight mt-0.5">Cliente con Onboarding previo. Se omitirá firma repetida.</p>
+                                  </div>
+                               </div>
+                               <p className="text-[9px] font-black text-[#003366] uppercase tracking-widest">Directo a Cierre (Sellar Diagnóstico)</p>
+                            </>
+                         ) : (
+                            <p className="text-[9px] font-black text-[#003366] uppercase tracking-widest">Sellar Expediente y Enviar Firma Externa (Cliente)</p>
+                         )}
                          <div className="flex flex-col gap-3">
                              {!certificationReady ? (
-                                <button type="button" onClick={handleSellarExpediente} className="w-full py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2">
-                                  {isProcessing ? <Loader2 size={16} className="animate-spin" /> : "Sellar y Generar Docs"} <ShieldCheck size={16}/>
+                                <button type="button" onClick={handleSellarExpediente} className="w-full py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-[11px] shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2 tracking-widest">
+                                  {isProcessing ? <Loader2 size={16} className="animate-spin" /> : (data.contrato_url && data.contrato_url.length > 5 ? "Sellar y Finalizar Expediente" : "Sellar y Generar Envío")} <ShieldCheck size={16}/>
                                 </button>
                              ) : (
                                 <div className="flex gap-2">
@@ -846,7 +1055,7 @@ export default function EntrevistaHub() {
                                <button 
                                  type="button" 
                                  onClick={async () => {
-                                   const yaTieneContrato = data.contratourl && data.contratourl.length > 5;
+                                   const yaTieneContrato = data.contrato_url && data.contrato_url.length > 5;
                                    const tipoDoc = yaTieneContrato ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
                                    const link = `${window.location.origin}/firma-externa/${data.id}?tipoDoc=${tipoDoc}`;
                                    await copyToClipboard(link);
@@ -965,6 +1174,12 @@ export default function EntrevistaHub() {
                 <AuditoriaInput registrarAccion={registrarAccion} label="Nombre del Cliente" value={data.nombre} fieldKey="nombre" isLocked={lockedFields.has('nombre')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nombre'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nombre} onChange={(v:any)=>updateData({nombre:v})} />
                 <AuditoriaInput registrarAccion={registrarAccion} label="CURP" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} hasAlert={data.curp && !VALIDATORS.CURP(data.curp)} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
                 <AuditoriaInput registrarAccion={registrarAccion} label="RFC" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} hasAlert={data.rfc && !VALIDATORS.RFC(data.rfc)} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
+                
+                <div className="pt-2 border-t border-white/5 space-y-3">
+                  <h6 className="text-[8px] font-black uppercase text-white/20 tracking-widest pl-1">Ubicación Registrada</h6>
+                  <AuditoriaInput registrarAccion={registrarAccion} label="Domicilio" value={data.domicilio} fieldKey="domicilio" isLocked={lockedFields.has('domicilio')} onUnlock={() => { const s = new Set(lockedFields); s.delete('domicilio'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.domicilio} onChange={(v:any)=>updateData({domicilio:v})} />
+                  <AuditoriaInput registrarAccion={registrarAccion} label="Código Postal" value={data.codigoPostal} fieldKey="codigoPostal" isLocked={lockedFields.has('codigoPostal')} onUnlock={() => { const s = new Set(lockedFields); s.delete('codigoPostal'); setLockedFields(s); }} hasAlert={data.codigoPostal && !VALIDATORS.CP(data.codigoPostal)} onChange={(v:any)=>updateData({codigoPostal:v.replace(/\D/g, '').substring(0, 5)})} />
+                </div>
                 
                 <AuditoriaInput registrarAccion={registrarAccion} label="NSS IMSS" value={data.nss} fieldKey="nss" isLocked={lockedFields.has('nss')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nss'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nss} hasAlert={data.nss && !VALIDATORS.NSS(data.nss)} onChange={(v:any)=>updateData({nss:v.replace(/\D/g, '').substring(0, 11)})} />
                 

@@ -5,7 +5,7 @@ import Webcam from 'react-webcam';
 import SignatureCanvas from 'react-signature-canvas';
 import { 
   Camera, Signature, ShieldCheck, CheckCircle2, AlertCircle, 
-  Loader2, ArrowRight, FileText, Lock
+  Loader2, ArrowRight, FileText, Lock, ExternalLink, MessageSquare
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { callGAS, getGASData } from '@/services/apiService';
