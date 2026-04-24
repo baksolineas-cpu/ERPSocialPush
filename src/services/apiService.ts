@@ -1,4 +1,4 @@
-const GAS_URL = "https://script.google.com/macros/s/AKfycbwabxqpyd4S9byVYetKcebxQVXWJ6Xs4kw2TOV-2Bq2G0VyDdxR687PH70c0VUJTYSG/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbyn-e11dJYIpiE2fUE76EvFQlSaQBr6YXvQlwSj1IvveDqDxlhOXj9IfygmWvN30PY2/exec";
 
 /**
  * Función maestra para enviar datos (POST)
@@ -9,7 +9,6 @@ export async function callGAS(action: string, payload: any = {}, userEmail: stri
     // TÉCNICA: "Fetch sin Pre-vuelo" -> Usamos text/plain y no-cors para forzar envío sin bloqueo
     const response = await fetch(GAS_URL, {
       method: 'POST',
-      mode: 'no-cors',
       redirect: 'follow',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
@@ -17,10 +16,8 @@ export async function callGAS(action: string, payload: any = {}, userEmail: stri
       body: JSON.stringify({ action, payload, userEmail }),
     });
 
-    // No usamos .json() directo por si el cuerpo es opaco o hay errores de parseo transitorios
     const text = await response.text();
     if (!text) {
-      // Si no hay texto pero el fetch no falló, Google recibió el payload pero no autorizó la respuesta
       return { success: true, status: 'success', warning: 'CORS_SILENT' };
     }
     

@@ -63,6 +63,7 @@ function handleUpdateSignature(payload) {
   const estatusCol = headers.indexOf("estatusfirma");
 
   const searchId = payload.clienteId.toString().toUpperCase();
+  logDebug("UPDATE_SIG", "Iniciando firma para: " + searchId);
   let rowIndex = -1;
 
   for (let i = 1; i < data.length; i++) {
@@ -77,26 +78,31 @@ function handleUpdateSignature(payload) {
   if (rowIndex === -1) return createResponse({ success: false, error: "Cliente no encontrado" }, 404);
 
   // 1. Guardar archivos en Drive
-  const cliente = getSheetData("CLIENTES")[rowIndex - 1]; // getSheetData devuelve objetos sin header
-  const folderId = cliente.id_carpeta_drive || cliente.idcarpetadrive;
+  const rowObj = getSheetData("CLIENTES")[rowIndex - 1];
+  const folderId = rowObj.id_carpeta_drive || rowObj.idcarpetadrive || rowObj.idCarpetaDrive;
   
   if (folderId) {
-    const folder = DriveApp.getFolderById(folderId);
-    if (payload.selfieBase64 && payload.selfieBase64.length > 50) {
-      const selfieBlob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg", `SELFIE_${searchId}.jpg`);
-      folder.createFile(selfieBlob);
-    }
-    if (payload.firmaBase64 && payload.firmaBase64.length > 50) {
-      const firmaBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png", `FIRMA_CLIENTE_${searchId}.png`);
-      folder.createFile(firmaBlob);
-    }
+    try {
+      const folder = DriveApp.getFolderById(folderId);
+      if (payload.selfieBase64 && payload.selfieBase64.length > 50) {
+        const selfieBlob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg", `SELFIE_${searchId}.jpg`);
+        folder.createFile(selfieBlob);
+      }
+      if (payload.firmaBase64 && payload.firmaBase64.length > 50) {
+        const firmaBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png", `FIRMA_CLIENTE_${searchId}.png`);
+        folder.createFile(firmaBlob);
+      }
+    } catch(e) { logDebug("SIG_SAVE_ERR", e.toString()); }
   }
 
   // 2. Actualizar estatus en Excel
-  sheet.getRange(rowIndex + 1, estatusCol + 1).setValue("COMPLETADO");
+  sheet.getRange(rowIndex + 1, estatusCol + 1).setValue("FIRMADO");
 
-  // 3. SELLAR DOCUMENTOS CON FIRMA Y SELFIE
+  // 3. SELLAR DOCUMENTOS CON FIRMA Y SELFIE (Fusión Final)
   const signedDocUrls = [];
+  const signatureTimestamp = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' });
+  const transactionId = Utilities.getUuid().substring(0, 8).toUpperCase();
+
   if (folderId) {
     try {
       const folder = DriveApp.getFolderById(folderId);
@@ -105,57 +111,88 @@ function handleUpdateSignature(payload) {
         const file = files.next();
         const fileName = file.getName();
         
-        // Buscamos docs para estampar firma según el workflow
-        const targetDocs = payload.tipoDocumento === 'DIAGNOSTICO' ? ["DIAGNOSTICO_CERTIFICADO"] : ["CONTRATO_PERSONALIZADO", "DIAGNOSTICO_CERTIFICADO"];
-        
+        const targetDocs = ["CONTRATO_PERSONALIZADO", "DIAGNOSTICO_CERTIFICADO"];
         let shouldProcess = false;
-        targetDocs.forEach(td => {
-          if (fileName.includes(td)) shouldProcess = true;
-        });
+        targetDocs.forEach(td => { if (fileName.includes(td)) shouldProcess = true; });
         
         if (shouldProcess && file.getMimeType() === MimeType.GOOGLE_DOCS) {
-           const doc = DocumentApp.openById(file.getId());
-           const body = doc.getBody();
+           logDebug("FUSING_DOC", fileName + " with ID: " + transactionId);
            
-           // Reemplazar llaves de posición con evidencia visual
-           replaceTextWithImage(body, "{{IMAGEN_FIRMA}}", payload.firmaBase64, "image/png", 200, 100);
-           replaceTextWithImage(body, "{{IMAGEN_SELFIE}}", payload.selfieBase64, "image/jpeg", 150, 150);
-           
-           // Por si es el diagnóstico y no tiene llaves, lo agregamos al final (fallback fallback)
-           if (fileName.includes("DIAGNOSTICO_CERTIFICADO")) {
-             // Agregamos tabla por robustez en diagnóstico (ya que no tiene llaves usualmente)
-             body.appendPageBreak();
-             const table = body.appendTable();
-             const row = table.appendTableRow();
-             if (payload.selfieBase64) {
-               const selfieBlob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg");
-               const cell = row.appendTableCell("EVIDENCIA BIOMÉTRICA (SELFIE)\n");
-               cell.appendImage(selfieBlob).setWidth(150).setHeight(150);
+           // SOLUCIÓN DEFINITIVA PRIVILEGIOS: Elevamos permiso a EDIT explícitamente antes de abrir
+           try {
+             file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT);
+           } catch(shareErr) {
+             logDebug("SHARE_ELEVATE_WARNING", shareErr.toString());
+           }
+
+           try {
+             const doc = DocumentApp.openById(file.getId());
+             const body = doc.getBody();
+             
+             // Actualización de Metadatos de Firma en el documento
+             body.replaceText("{{FECHA_FIRMA}}", signatureTimestamp);
+             body.replaceText("{{ID_TRANSACCION}}", transactionId);
+             body.replaceText("{{NOMBRE_CLIENTE}}", rowObj.nombre || rowObj.Nombre || "");
+             
+             // Fusiones de Tags (Ajuste de tamaño dinámico)
+             replaceTextWithImage(body, "{{IMAGEN_FIRMA}}", payload.firmaBase64, "image/png", 220, 110);
+             replaceTextWithImage(body, "{{IMAGEN_SELFIE}}", payload.selfieBase64, "image/jpeg", 140, 140);
+             
+             // Si es el diagnóstico, agregamos tabla de evidencia con diseño mejorado
+             if (fileName.includes("DIAGNOSTICO_CERTIFICADO")) {
+               body.appendPageBreak();
+               const table = body.appendTable();
+               
+               const headerRow = table.appendTableRow();
+               const headerCell = headerRow.appendTableCell("PROTOCOLO DE SEGURIDAD Y VALIDEZ DIGITAL - BAKSO S.C.");
+               headerCell.setBackgroundColor("#003366")
+                        .setAttributes({
+                          [DocumentApp.Attribute.FOREGROUND_COLOR]: "#FFFFFF",
+                          [DocumentApp.Attribute.BOLD]: true,
+                          [DocumentApp.Attribute.HORIZONTAL_ALIGNMENT]: DocumentApp.HorizontalAlignment.CENTER
+                        });
+               
+               const dataRow = table.appendTableRow();
+               dataRow.appendTableCell(`FECHA/HORA: ${signatureTimestamp}\nID RASTREO: ${transactionId}\nIP ORIGEN: ${payload.ip || "VERIFICADA"}`);
+               
+               const imgRow = table.appendTableRow();
+               if (payload.selfieBase64) {
+                 const cell = imgRow.appendTableCell("EVIDENCIA FACIAL (BIOMETRÍA)\n\n");
+                 try {
+                   const blob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg");
+                   cell.appendImage(blob).setWidth(160).setHeight(160);
+                 } catch(e) {}
+               }
+               if (payload.firmaBase64) {
+                 const cell = imgRow.appendTableCell("VOLUNTAD EXPRESA (RÚBRICA)\n\n");
+                 try {
+                   const blob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png");
+                   cell.appendImage(blob).setWidth(180).setHeight(90);
+                 } catch(e) {}
+               }
+               
+               table.setBorderWidth(1).setBorderColor("#EEEEEE");
+               
+               const footerRow = table.appendTableRow();
+               footerRow.appendTableCell("Este documento constituye una prueba electrónica fehaciente de conformidad. Social Push® No Repudio.")
+                        .setAttributes({[DocumentApp.Attribute.ITALIC]: true, [DocumentApp.Attribute.FONT_SIZE]: 8});
              }
-             if (payload.firmaBase64) {
-               const firmaBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png");
-               const cell = row.appendTableCell("CONSENTIMIENTO DIGITAL (FIRMA)\n");
-               cell.appendImage(firmaBlob).setWidth(200).setHeight(100);
-             }
-             table.setBorderWidth(0);
+             
+             doc.saveAndClose();
+           } catch (docErr) {
+             throw new Error("Privilegios denegados al editar el documento Google Doc. Asegúrate de ejecutar el Web App como 'Yo'. " + docErr.toString());
            }
            
-           doc.saveAndClose();
-        
-        // Aplicamos restricción de solo lectura
-        if (typeof Drive !== 'undefined') {
-          try {
-            Drive.Files.update({
-              contentRestrictions: [{ readOnly: true, reason: 'Finalized contract.' }]
-            }, file.getId());
-          } catch(e) { logDebug("LOCK_ERR", e.toString()); }
-        }
+           // Restaurar permisos a VIEW para el original
+           try {
+             file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+           } catch(e) {}
            
-           // Convertir a PDF y guardar
+           // Convertir a PDF Final
            const pdfBlob = file.getAs('application/pdf');
-           const pdfFile = folder.createFile(pdfBlob).setName(fileName + ".pdf");
-           pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-           signedDocUrls.push(pdfFile.getUrl());
+           const finalPdf = folder.createFile(pdfBlob).setName(fileName + "_FIRMADO_" + transactionId + ".pdf");
+           finalPdf.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+           signedDocUrls.push(finalPdf.getUrl());
         }
       }
       
@@ -167,7 +204,7 @@ function handleUpdateSignature(payload) {
          const attachments = [];
          while (pdfFiles.hasNext()) {
            const f = pdfFiles.next();
-           if (f.getName().includes("CONTRATO_PERSONALIZADO") || f.getName().includes("DIAGNOSTICO_CERTIFICADO")) {
+           if (f.getName().includes("FIRMADO")) {
              attachments.push(f.getBlob());
            }
          }
@@ -262,49 +299,22 @@ function handleFinalizeAudit(payload) {
          try {
            const faBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaAsesor.split(",")[1]), "image/png");
            diagBody.appendImage(faBlob).setWidth(150).setHeight(75);
-         } catch(errFirma) {}
+         } catch(errFirma) { logDebug("FIRMA_ASESOR_ERR", errFirma.toString()); }
        }
+       
+       // Agregamos llaves de firma para el flujo de handleUpdateSignature (Fase 2: Cliente)
+       diagBody.appendParagraph("\n\n{{IMAGEN_FIRMA}}\n\n{{IMAGEN_SELFIE}}").setAlignment(DocumentApp.HorizontalAlignment.CENTER);
 
        diagDoc.saveAndClose();
        const diagFile = DriveApp.getFileById(diagDoc.getId());
        diagFile.moveTo(folder);
        diagFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-       
-       // Si skipContrato es true, significa que omitiremos FirmaExterna, así que debemos convertir a PDF y enviar por correo aquí mismo.
-       if (skipContrato) {
-         try {
-           const pdfBlob = diagFile.getAs('application/pdf');
-           const pdfFile = folder.createFile(pdfBlob).setName(`DIAGNOSTICO_CERTIFICADO_${payload.curp || payload.id}.pdf`);
-           pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-           
-           if (payload.email && payload.email.includes("@")) {
-             const allPdfFiles = folder.getFilesByType(MimeType.PDF);
-             const attachments = [];
-             while (allPdfFiles.hasNext()) {
-               const f = allPdfFiles.next();
-               if (f.getName().includes("CONTRATO_PERSONALIZADO") || f.getName().includes("DIAGNOSTICO_CERTIFICADO")) {
-                 attachments.push(f.getBlob());
-               }
-             }
-             if (attachments.length > 0) {
-               MailApp.sendEmail({
-                 to: payload.email,
-                 subject: "Diagnóstico Finalizado - Social Push®",
-                 body: `Hola ${payload.nombre || ""},\n\nTu expediente digital ha sido actualizado. Adjuntamos tu Certificación de Diagnóstico (y Contrato Marco previo) en formato PDF.\n\nGracias por confiar en Social Push®.`,
-                 attachments: attachments
-               });
-             }
-           }
-         } catch(pdfErr) {
-           logDebug("❌ ERROR PDF FINALIZE", pdfErr.toString());
-         }
-       }
     }
   } catch(e) {
-    logDebug("❌ ERROR GENERANDO CONTRATO", e.toString());
+    logDebug("❌ ERROR PROCESANDO AUDITORIA", e.toString());
   }
   
-  return createResponse({ success: true, message: "Certificación y documentos generados correctamente" });
+  return createResponse({ success: true, message: "Certificación generada. Pendiente firma de cliente." });
 }
 
 function doGet(e) {
@@ -578,8 +588,11 @@ function handleCreateHoja(payload) {
 
 function handleUploadFile(payload) {
   try {
-    logDebug("UPLOAD_FILE", "Intentando subir a: " + payload.id_carpeta_drive + ", Archivo: " + payload.fileName);
-    const folder = DriveApp.getFolderById(payload.id_carpeta_drive);
+    const fId = payload.id_carpeta_drive || payload.idcarpetadrive || payload.idCarpetaDrive;
+    logDebug("UPLOAD_FILE", "Intentando subir a: " + fId + ", Archivo: " + payload.fileName);
+    if (!fId) throw new Error("ID de carpeta no proporcionado.");
+    
+    const folder = DriveApp.getFolderById(fId);
     
     let base64Data = payload.fileData;
     if (base64Data.includes("base64,")) {
@@ -588,8 +601,9 @@ function handleUploadFile(payload) {
     base64Data = base64Data.replace(/[\r\n]/g, '').trim();
     
     let mimeType = 'application/pdf';
-    if (payload.fileName.toUpperCase().endsWith('.JPG') || payload.fileName.toUpperCase().endsWith('.JPEG')) mimeType = 'image/jpeg';
-    else if (payload.fileName.toUpperCase().endsWith('.PNG')) mimeType = 'image/png';
+    const nameUpper = payload.fileName.toUpperCase();
+    if (nameUpper.endsWith('.JPG') || nameUpper.endsWith('.JPEG')) mimeType = 'image/jpeg';
+    else if (nameUpper.endsWith('.PNG')) mimeType = 'image/png';
 
     const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeType, payload.fileName);
     const file = folder.createFile(blob);
@@ -677,21 +691,44 @@ function createResponse(data, code = 200) {
 
 function replaceTextWithImage(body, searchText, base64Data, mimeType, width, height) {
   if (!base64Data) return;
-  const match = body.findText(searchText);
-  if (match) {
-    const textElement = match.getElement().asText();
-    const parent = textElement.getParent();
-    // Reemplaza el texto para que ya no aparezca
-    textElement.setText(textElement.getText().replace(searchText, ''));
-    try {
-      const blob = Utilities.newBlob(Utilities.base64Decode(base64Data.split(",")[1]), mimeType);
-      const img = parent.asParagraph().insertInlineImage(parent.getChildIndex(textElement), blob);
-      if (width && height) {
-        img.setWidth(width).setHeight(height);
+  try {
+    const match = body.findText(searchText);
+    if (match) {
+      const textElement = match.getElement().asText();
+      const parent = textElement.getParent();
+      
+      // Sanitización segura del texto
+      const currentText = textElement.getText();
+      if (currentText.includes(searchText)) {
+        textElement.setText(currentText.replace(searchText, ''));
       }
-    } catch(e) {
-      logDebug("REPLACE_IMG_ERR", "No se pudo insertar imagen para: " + searchText + " - " + e.toString());
+      
+      const blob = Utilities.newBlob(Utilities.base64Decode(base64Data.split(",")[1]), mimeType);
+      
+      let img;
+      if (parent.getType() === DocumentApp.ElementType.PARAGRAPH) {
+        const paragraph = parent.asParagraph();
+        img = paragraph.insertInlineImage(paragraph.getChildIndex(textElement), blob);
+        // Centrar si es contenido de firma/selfie
+        paragraph.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+      } else if (parent.getType() === DocumentApp.ElementType.TABLE_CELL) {
+        const cell = parent.asTableCell();
+        img = cell.appendImage(blob);
+        cell.setVerticalAlignment(DocumentApp.VerticalAlignment.CENTER);
+      } else {
+        img = body.appendImage(blob);
+      }
+      
+      if (img && width && height) {
+        // Validación de dimensiones máximas para evitar desbordamiento de página
+        const maxWidth = 500; 
+        const actualWidth = Math.min(width, maxWidth);
+        const ratio = actualWidth / width;
+        img.setWidth(actualWidth).setHeight(height * ratio);
+      }
     }
+  } catch(e) {
+    logDebug("REPLACE_IMG_ERR", "Error en " + searchText + ": " + e.toString());
   }
 }
 

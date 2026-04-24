@@ -434,7 +434,12 @@ export default function EntrevistaHub() {
       if (data.id?.startsWith('NEW_')) {
         setPendingUploads(prev => ({ ...prev, [type]: base64.split(',')[1] }));
       } else {
-        callGAS('UPLOAD_FILE', { fileName: `${type.toUpperCase()}_${data.id}.pdf`, fileData: base64.split(',')[1], id_carpeta_drive: data.id_carpeta_drive || data.idcarpetadrive });
+        const folderId = data.id_carpeta_drive || data.idcarpetadrive || data.idCarpetaDrive;
+        callGAS('UPLOAD_FILE', { 
+          fileName: `${type.toUpperCase()}_${data.id}.pdf`, 
+          fileData: base64.split(',')[1], 
+          id_carpeta_drive: folderId 
+        });
       }
     } finally { 
        clearInterval(progressInterval);
@@ -570,22 +575,14 @@ export default function EntrevistaHub() {
          setFinalLink(link);
          setCertificationReady(true);
 
-         if (yaTieneContrato) {
-           // Omitir envío de WhatsApp/Firma externa si ya tiene el contrato original (Ej. Onboarding).
-           // Se estampa directamente el diagnóstico (con la firma del asesor por detrás) y terminamos.
-           addToast("Diagnóstico sellado automáticamente. Identidad previamente verificada.", 'success');
-           updateData({ estatusfirma: 'COMPLETADO' });
-           registrarAccion(`Expediente Finalizado (Diagnóstico). Contrato e Identidad heredados.`);
-         } else {
-           addToast("Expediente sellado y sellos generados ✓", 'success');
-           registrarAccion(`Expediente Certificado. Preparado para envío (${tipoDoc}).`);
+         addToast("Expediente sellado y sellos generados ✓", 'success');
+         registrarAccion(`Expediente Certificado. Preparado para envío (${tipoDoc}).`);
 
-           // Disparar WhatsApp automáticamente si hay número
-           if (data.whatsapp) {
-             setTimeout(() => {
-               handleEnviarNotificacion('whatsapp', link);
-             }, 500);
-           }
+         // Disparar WhatsApp automáticamente si hay número
+         if (data.whatsapp) {
+           setTimeout(() => {
+             handleEnviarNotificacion('whatsapp', link);
+           }, 500);
          }
       } else {
          addToast("La certificación falló", 'error');
