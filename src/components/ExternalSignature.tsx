@@ -21,7 +21,7 @@ export default function ExternalSignature() {
   const [clientData, setClientData] = useState<any>(null);
   const [selfieBase64, setSelfieBase64] = useState<string | undefined>(skipSelfieParam ? 'VALIDO' : undefined);
   const [firmaBase64, setFirmaBase64] = useState<string | undefined>();
-  const [signedDocUrls, setSignedDocUrls] = useState<string[]>([]);
+  const [signedDocUrls, setSignedDocUrls] = useState<{ name: string; url: string }[]>([]);
   const [folderUrl, setFolderUrl] = useState<string | null>(null);
   const [montoTotal, setMontoTotal] = useState<string>("0.00");
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +82,7 @@ export default function ExternalSignature() {
   };
 
   if (step === 3) {
-    const waMessage = `Hola ${clientData?.nombre || 'Cliente'}. Tu expediente ha sido formalizado.\n\nPuedes descargar tus documentos aquí:\n${signedDocUrls.join('\n')}${folderUrl ? `\n\nTu carpeta de expediente completa en Drive:\n${folderUrl}` : ''}`;
+    const waMessage = `Hola ${clientData?.nombre || 'Cliente'}. Tu expediente ha sido formalizado.\n\nPuedes descargar tus documentos aquí:\n${signedDocUrls.map(d => d.url).join('\n')}${folderUrl ? `\n\nTu carpeta de expediente completa en Drive:\n${folderUrl}` : ''}`;
     const waUrl = `https://api.whatsapp.com/send?phone=${(clientData?.whatsapp || '').toString().replace(/\D/g, '')}&text=${encodeURIComponent(waMessage)}`;
 
     return (
@@ -93,17 +93,17 @@ export default function ExternalSignature() {
           <p className="text-slate-500 mx-auto">Su expediente digital ha sido formalizado correctamente.</p>
           
           <div className="space-y-3 pt-6">
-            {signedDocUrls.map((url, idx) => (
+            {signedDocUrls.map((doc, idx) => (
               <a 
                 key={idx} 
-                href={url} 
+                href={doc.url} 
                 target="_blank" 
                 rel="noreferrer"
                 className="w-full flex items-center justify-between p-4 bg-slate-50 border rounded-2xl hover:bg-slate-100 transition-all group"
               >
                 <div className="flex items-center gap-3">
                   <FileText className="text-slate-400 group-hover:text-blue-600 transition-colors" size={20} />
-                  <span className="text-[10px] font-black uppercase text-slate-600">Documento {idx + 1}</span>
+                  <span className="text-[10px] font-black uppercase text-slate-600 truncate max-w-[200px]">{doc.name}</span>
                 </div>
                 <ExternalLink size={14} className="text-slate-300" />
               </a>

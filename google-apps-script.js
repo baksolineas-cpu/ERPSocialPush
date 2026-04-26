@@ -158,10 +158,12 @@ function handleUpdateSignature(payload) {
              // Estampado Seguro con Blobs (Triple Firma)
              if (finalFirmaBlob) {
                replaceTextWithImageBlob(body, "{{firma_cliente}}", finalFirmaBlob, 220, 110);
+               replaceTextWithImageBlob(body, "{{FIRMA_CLIENTE}}", finalFirmaBlob, 220, 110);
                replaceTextWithImageBlob(body, "{{IMAGEN_FIRMA}}", finalFirmaBlob, 220, 110);
              }
              if (finalSelfieBlob) {
                replaceTextWithImageBlob(body, "{{selfie}}", finalSelfieBlob, 140, 140);
+               replaceTextWithImageBlob(body, "{{SELFIE}}", finalSelfieBlob, 140, 140);
                replaceTextWithImageBlob(body, "{{IMAGEN_SELFIE}}", finalSelfieBlob, 140, 140);
              }
              
@@ -172,7 +174,7 @@ function handleUpdateSignature(payload) {
              const pdfBlob = file.getAs('application/pdf');
              const pdfFile = folder.createFile(pdfBlob).setName(fileName + "_FIRMADO_" + transactionId + ".pdf");
              pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-             signedDocUrls.push(pdfFile.getUrl());
+             signedDocUrls.push({ name: pdfFile.getName(), url: pdfFile.getUrl() });
              
              // ELIMINACION DEL DOC TEMPORAL SEGUN DIRECTIVA
              file.setTrashed(true);
@@ -254,7 +256,7 @@ function handleFinalizeAudit(payload) {
         } catch(errC) { logDebug("ERR_CLONE_CONTRATO", errC.toString()); }
 
         // B. GENERACIÓN DE DIAGNÓSTICO CERTIFICADO REDISEÑADO
-        generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados);
+        generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor);
       }
     }
   } catch(e) { logDebug("ERR_DOC_GEN_MAIN", e.toString()); }
@@ -262,7 +264,7 @@ function handleFinalizeAudit(payload) {
   return createResponse({ success: true });
 }
 
-function generateDiagnosticPDF(clientData, servicesData, montoTotal) {
+function generateDiagnosticPDF(clientData, servicesData, montoTotal, asesorName, firmaAsesorBase64) {
   try {
     const folderId = clientData.id_carpeta_drive || clientData.idcarpetadrive;
     if (!folderId) return;
@@ -297,11 +299,11 @@ function generateDiagnosticPDF(clientData, servicesData, montoTotal) {
     body.appendParagraph("\nIV. CLÁUSULA DE PRIVACIDAD Y VALIDEZ:").setBold(true);
     body.appendParagraph("Este Diagnóstico Técnico de Viabilidad de Derechos se emite bajo los estándares de materialidad fiscal de BAKSO, S.C. La identidad del solicitante ha sido validada mediante biometría facial (Selfie) y firma autógrafa digital, vinculando el presente dictamen al expediente único de cliente en nuestra bóveda de seguridad social.").setAttributes({[DocumentApp.Attribute.FONT_SIZE]: 8, [DocumentApp.Attribute.ITALIC]: true});
 
-    body.appendParagraph("\n\n__________________________\nDIRECCIÓN TÉCNICA - ASESOR");
+    body.appendParagraph("\n\n__________________________\nDIRECCIÓN TÉCNICA - " + (asesorName || "ASESOR"));
 
     // Firma del asesor
     try {
-      const fa = clientData.firmaAsesor || clientData.firmaasesor;
+      const fa = firmaAsesorBase64 || clientData.firmaAsesor || clientData.firmaasesor;
       if (fa && fa.length > 50) {
         const faBlob = Utilities.newBlob(Utilities.base64Decode(fa.split(",")[1]), "image/png");
         body.appendImage(faBlob).setWidth(140).setHeight(70);
