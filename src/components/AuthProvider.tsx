@@ -5,7 +5,7 @@ import { callGAS, getGASData } from '@/services/apiService';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string) => Promise<void>;
+  login: (email: string, password?: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -23,11 +23,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(false);
   }, []);
 
-  const login = async (email: string) => {
+  const login = async (email: string, password?: string) => {
     try {
       const cleanEmail = email.trim().toLowerCase();
       // Usamos getGASData con la acción LOGIN pasando params correctamente
-      const response = await getGASData('LOGIN', { email: cleanEmail });
+      const response = await getGASData('LOGIN', { email: cleanEmail, password: password });
       
       if (response && response.success && response.user) {
         const userData: User = { 

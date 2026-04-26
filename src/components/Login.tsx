@@ -5,13 +5,14 @@ import { LogIn, ShieldCheck, Loader2 } from 'lucide-react';
 export default function Login() {
   const { login } = useAuth();
   const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
   const [isLoggingIn, setIsLoggingIn] = React.useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
     setIsLoggingIn(true);
-    await login(email);
+    await login(email, password);
     setIsLoggingIn(false);
   };
 
@@ -37,6 +38,17 @@ export default function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="tu@correo.com"
+              className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
+              required
+            />
+          </div>
+          <div className="space-y-1.5 text-left">
+            <label className="text-xs font-bold text-slate-500 uppercase ml-1">Contraseña</label>
+            <input 
+              type="password" 
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
               className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
               required
             />

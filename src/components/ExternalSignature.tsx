@@ -73,7 +73,7 @@ export default function ExternalSignature() {
   };
 
   if (step === 3) {
-    const waMessage = `Hola ${clientData?.nombre || 'Cliente'}. Tu expediente ha sido formalizado. Puedes descargar tus documentos aquí: ${signedDocUrls.join(' | ')}`;
+    const waMessage = `Hola ${clientData?.nombre || 'Cliente'}. Tu expediente ha sido formalizado.\n\nPuedes descargar tus documentos aquí:\n${signedDocUrls.join('\n')}`;
     const waUrl = `https://api.whatsapp.com/send?phone=${(clientData?.whatsapp || '').toString().replace(/\D/g, '')}&text=${encodeURIComponent(waMessage)}`;
 
     return (
@@ -178,9 +178,39 @@ export default function ExternalSignature() {
                         </div>
                         <FileText className="text-slate-100 group-hover:text-slate-200 transition-colors" size={48} />
                       </div>
-                      <div className="text-slate-700 italic leading-relaxed whitespace-pre-wrap font-medium text-lg">
+                      <div className="text-slate-700 italic leading-relaxed whitespace-pre-wrap font-medium text-lg border-b border-slate-50 pb-6 mb-6">
                         {clientData?.diagnosticoTexto || clientData?.hojaservicio?.diagnostico || clientData?.hojaservicio?.notasdiagnostico || clientData?.hojaservicio?.notas || "Cargando su diagnóstico personalizado..."}
                       </div>
+
+                      {clientData?.hojaservicio && (
+                        <div className="space-y-6">
+                           <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                             <h5 className="text-[10px] font-black uppercase text-[#003366] mb-3">Resumen de Servicios Contratados</h5>
+                             <p className="text-sm font-bold text-slate-800">{clientData.hojaservicio.servicios || 'No especificado'}</p>
+                             <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center">
+                               <span className="text-[10px] font-bold text-slate-400 uppercase">Monto Total Estimado</span>
+                               <span className="text-xl font-black text-[#DAA520]">${clientData.hojaservicio.monto || '0'}</span>
+                             </div>
+                           </div>
+
+                           {clientData.hojaservicio.asesor && (
+                             <div className="pt-6 border-t border-slate-100 mt-6 grid grid-cols-2">
+                               <div className="space-y-2">
+                                 <p className="text-[10px] font-black uppercase text-slate-400">Asesor a Cargo</p>
+                                 <p className="text-xs font-bold text-[#003366] uppercase">{clientData.hojaservicio.asesor}</p>
+                               </div>
+                               {clientData.hojaservicio.firmaasesor && (
+                                 <div className="flex flex-col items-end">
+                                   <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Firma del Asesor</p>
+                                   <div className="bg-white border rounded p-2 h-16 w-32 flex items-center justify-center">
+                                      <img src={clientData.hojaservicio.firmaasesor} alt="Firma Asesor" className="max-h-full max-w-full object-contain mix-blend-multiply" />
+                                   </div>
+                                 </div>
+                               )}
+                             </div>
+                           )}
+                        </div>
+                      )}
                    </div>
                  </div>
                </div>

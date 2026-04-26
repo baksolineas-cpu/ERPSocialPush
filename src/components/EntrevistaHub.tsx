@@ -16,7 +16,7 @@ import { Cliente } from '@/types';
 import { useCase } from './CaseContext';
 
   // --- SUB-COMPONENTE: INPUT DE AUDITORÍA PREMIUM ---
-  function AuditoriaInput({ label, value, isLoading, isLocked, onUnlock, onChange, hasAlert, fieldKey, registrarAccion }: any) {
+  function AuditoriaInput({ label, value, isLoading, isLocked, onUnlock, onChange, onBlur, hasAlert, fieldKey, registrarAccion }: any) {
     return (
       <div className="space-y-1.5 group">
         <div className="flex justify-between items-center px-1">
@@ -37,6 +37,7 @@ import { useCase } from './CaseContext';
                     onChange(e.target.value);
                     if (fieldKey && !isLocked) registrarAccion(`Modificación manual en ${label}: ${e.target.value}`);
                 }}
+                onBlur={onBlur}
                 readOnly={isLocked}
                 placeholder={`Capturar ${label}`}
                 className={cn(
@@ -224,6 +225,16 @@ export default function EntrevistaHub() {
 
   const updateData = (newData: Partial<Cliente>) => {
     setData(prev => ({ ...prev, ...newData }));
+  };
+
+  const handleAutoSave = async () => {
+    if (!data.id && !data.curp) return;
+    try {
+      await callGAS('ONBOARDING_SYNC', data);
+      addToast("Guardado", "success");
+    } catch (e) {
+      console.warn("Autosave failed", e);
+    }
   };
 
   const addNssAdicional = () => {
@@ -543,8 +554,10 @@ export default function EntrevistaHub() {
     
     setIsProcessing(true);
     const firmaAsesor = sigCanvasAsesor.current?.getTrimmedCanvas().toDataURL('image/png');
-    const serviciosFinales = hojaServicio.servicios.map(s => s.nombre);
-    if (hojaServicio.otroServicioTexto) serviciosFinales.push(hojaServicio.otroServicioTexto);
+    const serviciosFinales = hojaServicio.servicios.map(s => {
+      const nombre = s.nombre === 'Otro' ? hojaServicio.otroServicioTexto : s.nombre;
+      return `${nombre} (${s.universo})`;
+    });
 
     try {
       const yaTieneContrato = data.contrato_url && data.contrato_url.length > 5;
@@ -900,17 +913,7 @@ export default function EntrevistaHub() {
                             </div>
                         </div>
                         <div className="space-y-4 p-6 bg-[#003366] rounded-[32px] border border-white/10 shadow-2xl">
-                            <label className="text-[10px] font-black uppercase text-[#DAA520] tracking-widest text-center block">Propuesta Económica y Recurrencia</label>
-                            <div className="grid grid-cols-2 gap-3 mb-4">
-                                <button onClick={() => setHojaServicio(prev => ({...prev, universo: 'U1'}))} className={cn("p-4 border-2 rounded-2xl font-black text-[10px] uppercase transition-all flex flex-col items-center gap-1", hojaServicio.universo === 'U1' ? "border-[#DAA520] bg-[#DAA520] text-[#003366]" : "bg-white/5 text-white/40 border-white/10")}>
-                                    <span>U1</span>
-                                    <span className="text-[8px] opacity-70">Única Vez</span>
-                                </button>
-                                <button onClick={() => setHojaServicio(prev => ({...prev, universo: 'U2'}))} className={cn("p-4 border-2 rounded-2xl font-black text-[10px] uppercase transition-all flex flex-col items-center gap-1", hojaServicio.universo === 'U2' ? "border-[#DAA520] bg-[#DAA520] text-[#003366]" : "bg-white/5 text-white/40 border-white/10")}>
-                                    <span>U2</span>
-                                    <span className="text-[8px] opacity-70">Recurrente</span>
-                                </button>
-                            </div>
+                            <label className="text-[10px] font-black uppercase text-[#DAA520] tracking-widest text-center block">Propuesta Económica (Monto Total)</label>
                             <div className="relative">
                                 <span className="absolute left-5 top-1/2 -translate-y-1/2 text-[#DAA520] font-black text-xl">$</span>
                                 <input type="number" value={hojaServicio.honorariosAcordados || ''} onChange={(e) => setHojaServicio(prev => ({...prev, honorariosAcordados: Number(e.target.value)}))} placeholder="0.00" className="w-full pl-10 p-5 bg-white/10 border border-white/10 rounded-2xl font-black text-2xl text-white focus:border-[#DAA520] outline-none shadow-inner"/>
@@ -1168,17 +1171,17 @@ export default function EntrevistaHub() {
                     </div>
                 </div>
 
-                <AuditoriaInput registrarAccion={registrarAccion} label="Nombre del Cliente" value={data.nombre} fieldKey="nombre" isLocked={lockedFields.has('nombre')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nombre'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nombre} onChange={(v:any)=>updateData({nombre:v})} />
-                <AuditoriaInput registrarAccion={registrarAccion} label="CURP" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} hasAlert={data.curp && !VALIDATORS.CURP(data.curp)} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
-                <AuditoriaInput registrarAccion={registrarAccion} label="RFC" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} hasAlert={data.rfc && !VALIDATORS.RFC(data.rfc)} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
+                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Nombre del Cliente" value={data.nombre} fieldKey="nombre" isLocked={lockedFields.has('nombre')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nombre'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nombre} onChange={(v:any)=>updateData({nombre:v})} />
+                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="CURP" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} hasAlert={data.curp && !VALIDATORS.CURP(data.curp)} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
+                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="RFC" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} hasAlert={data.rfc && !VALIDATORS.RFC(data.rfc)} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
                 
                 <div className="pt-2 border-t border-white/5 space-y-3">
                   <h6 className="text-[8px] font-black uppercase text-white/20 tracking-widest pl-1">Ubicación Registrada</h6>
-                  <AuditoriaInput registrarAccion={registrarAccion} label="Domicilio" value={data.domicilio} fieldKey="domicilio" isLocked={lockedFields.has('domicilio')} onUnlock={() => { const s = new Set(lockedFields); s.delete('domicilio'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.domicilio} onChange={(v:any)=>updateData({domicilio:v})} />
-                  <AuditoriaInput registrarAccion={registrarAccion} label="Código Postal" value={data.codigoPostal} fieldKey="codigoPostal" isLocked={lockedFields.has('codigoPostal')} onUnlock={() => { const s = new Set(lockedFields); s.delete('codigoPostal'); setLockedFields(s); }} hasAlert={data.codigoPostal && !VALIDATORS.CP(data.codigoPostal)} onChange={(v:any)=>updateData({codigoPostal:v.replace(/\D/g, '').substring(0, 5)})} />
+                  <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Domicilio" value={data.domicilio} fieldKey="domicilio" isLocked={lockedFields.has('domicilio')} onUnlock={() => { const s = new Set(lockedFields); s.delete('domicilio'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.domicilio} onChange={(v:any)=>updateData({domicilio:v})} />
+                  <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Código Postal" value={data.codigoPostal} fieldKey="codigoPostal" isLocked={lockedFields.has('codigoPostal')} onUnlock={() => { const s = new Set(lockedFields); s.delete('codigoPostal'); setLockedFields(s); }} hasAlert={data.codigoPostal && !VALIDATORS.CP(data.codigoPostal)} onChange={(v:any)=>updateData({codigoPostal:v.replace(/\D/g, '').substring(0, 5)})} />
                 </div>
                 
-                <AuditoriaInput registrarAccion={registrarAccion} label="NSS IMSS" value={data.nss} fieldKey="nss" isLocked={lockedFields.has('nss')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nss'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nss} hasAlert={data.nss && !VALIDATORS.NSS(data.nss)} onChange={(v:any)=>updateData({nss:v.replace(/\D/g, '').substring(0, 11)})} />
+                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="NSS IMSS" value={data.nss} fieldKey="nss" isLocked={lockedFields.has('nss')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nss'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nss} hasAlert={data.nss && !VALIDATORS.NSS(data.nss)} onChange={(v:any)=>updateData({nss:v.replace(/\D/g, '').substring(0, 11)})} />
                 
                 {/* NSS ADICIONALES DINÁMICOS */}
                 {data.nssList && data.nssList.map((extNss, idx) => (
@@ -1201,11 +1204,11 @@ export default function EntrevistaHub() {
                 </button>
                 
                 <div className="grid grid-cols-2 gap-4">
-                    <AuditoriaInput registrarAccion={registrarAccion} label="Semanas IMSS" value={data.semanasCotizadas} fieldKey="semanasCotizadas" isLocked={lockedFields.has('semanasCotizadas')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasCotizadas'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.semanasCotizadas} onChange={(v:any)=>updateData({semanasCotizadas:v})} />
-                    <AuditoriaInput registrarAccion={registrarAccion} label="Último Salario" value={data.ultimoSalario} fieldKey="ultimoSalario" isLocked={lockedFields.has('ultimoSalario')} onUnlock={() => { const s = new Set(lockedFields); s.delete('ultimoSalario'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.ultimoSalario} onChange={(v:any)=>updateData({ultimoSalario:v})} />
+                    <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Semanas IMSS" value={data.semanasCotizadas} fieldKey="semanasCotizadas" isLocked={lockedFields.has('semanasCotizadas')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasCotizadas'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.semanasCotizadas} onChange={(v:any)=>updateData({semanasCotizadas:v})} />
+                    <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Último Salario" value={data.ultimoSalario} fieldKey="ultimoSalario" isLocked={lockedFields.has('ultimoSalario')} onUnlock={() => { const s = new Set(lockedFields); s.delete('ultimoSalario'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.ultimoSalario} onChange={(v:any)=>updateData({ultimoSalario:v})} />
                 </div>
-                <AuditoriaInput registrarAccion={registrarAccion} label="WhatsApp" value={data.whatsapp} fieldKey="whatsapp" isLocked={lockedFields.has('whatsapp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('whatsapp'); setLockedFields(s); }} onChange={(v:any)=>updateData({whatsapp:v})} />
-                <AuditoriaInput registrarAccion={registrarAccion} label="Email de Contacto" value={data.email} fieldKey="email" isLocked={lockedFields.has('email')} onUnlock={() => { const s = new Set(lockedFields); s.delete('email'); setLockedFields(s); }} hasAlert={data.email && !VALIDATORS.EMAIL(data.email)} onChange={(v:any)=>updateData({email:v})} />
+                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="WhatsApp" value={data.whatsapp} fieldKey="whatsapp" isLocked={lockedFields.has('whatsapp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('whatsapp'); setLockedFields(s); }} onChange={(v:any)=>updateData({whatsapp:v})} />
+                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Email de Contacto" value={data.email} fieldKey="email" isLocked={lockedFields.has('email')} onUnlock={() => { const s = new Set(lockedFields); s.delete('email'); setLockedFields(s); }} hasAlert={data.email && !VALIDATORS.EMAIL(data.email)} onChange={(v:any)=>updateData({email:v})} />
 
                 {/* CONTACTOS EXTRA DINÁMICOS */}
                 {data.contactosExtra && data.contactosExtra.map((cX, idx) => (
@@ -1237,7 +1240,7 @@ export default function EntrevistaHub() {
                   <PlusCircle size={14} /> Añadir Contacto Adicional
                 </button>
 
-                <AuditoriaInput registrarAccion={registrarAccion} label="Régimen Fiscal" value={data.regimenFiscal} fieldKey="regimenFiscal" isLocked={lockedFields.has('regimenFiscal')} onUnlock={() => { const s = new Set(lockedFields); s.delete('regimenFiscal'); setLockedFields(s); }} onChange={(v:any)=>updateData({regimenFiscal:v})} />
+                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Régimen Fiscal" value={data.regimenFiscal} fieldKey="regimenFiscal" isLocked={lockedFields.has('regimenFiscal')} onUnlock={() => { const s = new Set(lockedFields); s.delete('regimenFiscal'); setLockedFields(s); }} onChange={(v:any)=>updateData({regimenFiscal:v})} />
             </div>
             
             {/* Control Flotante Inferior fijo dentro del aside */}
@@ -1262,7 +1265,7 @@ export default function EntrevistaHub() {
                <p className="text-xl text-emerald-400 font-bold italic tracking-tight">Firma y Selfie recibidas. El diagnóstico y contrato han sido sellados en PDF.</p>
                
                <div className="flex flex-col md:flex-row gap-4">
-                 <button type="button" onClick={() => window.location.reload()} className="px-10 py-4 bg-white text-[#003366] rounded-full font-black uppercase tracking-widest hover:bg-slate-100 transition-all">Tablero Maestro</button>
+                 <button type="button" onClick={() => window.location.reload()} className="px-10 py-4 bg-white text-[#003366] rounded-full font-black uppercase tracking-widest hover:bg-slate-100 transition-all">Actualizar Expediente</button>
                  {data.id_carpeta_drive && (
                    <a 
                      href={`https://drive.google.com/drive/folders/${data.id_carpeta_drive}`} 

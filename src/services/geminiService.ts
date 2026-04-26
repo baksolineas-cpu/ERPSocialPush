@@ -39,6 +39,7 @@ Usa EXACTAMENTE estas claves, si el dato no está presente asigna un string vac�
 - "ultimoSalario": Salario base de cotización o diario.
 - "regimenFiscal": Régimen fiscal o tipo de contribuyente.
 - "domicilio": Domicilio completo o dirección.
+- "patrones": Lista de los últimos patrones o razones sociales con las que cotizó (separados por coma, o estructurados en texto breve).
 No inventes datos. Devuelve SOLO el bloque JSON validado.`;
   
   if (docType === 'COMPLEMENTARIO') {
@@ -98,7 +99,8 @@ No inventes datos. Devuelve SOLO el bloque JSON validado.`;
     domicilio: String(parsed.domicilio || '').trim().replace(/[\n\r]/g, ' '),
     codigoPostal: cleanNum(parsed.codigoPostal || parsed.cp).substring(0, 5) || '',
     tipo_complemento: parsed.tipo_complemento || 'Ninguno',
-    semanas_extra: parseInt(cleanNum(parsed.semanas_extra)) || 0
+    semanas_extra: parseInt(cleanNum(parsed.semanas_extra)) || 0,
+    patrones: String(parsed.patrones || '').trim()
   };
 }
 
@@ -172,15 +174,21 @@ export async function getSidebarConsultantResponse(history: any[], context: any)
     Actúa con un tono profesional, preciso y enfocado en la Ley 73 y Ley 97 del Seguro Social.
     Sé conciso y directo en tus respuestas, no des explicaciones largas a menos que se te pidan.
 
-    CONTEXTO DEL CLIENTE ACTUAL:
-    - Nombre: ${context?.currentCase?.cliente?.nombre || 'Usuario Anónimo'}
-    - CURP: ${context?.currentCase?.cliente?.curp || 'No especificada'}
-    - Semanas Cotizadas reconocidas (IMSS): ${context?.currentCase?.cliente?.semanasCotizadas || 0}
-    - Semanas Extra aportadas / dictaminadas: ${context?.currentCase?.cliente?.semanasExtra || 0}
-    - Salario Diario / Cotización actual: ${context?.currentCase?.cliente?.ultimoSalario || 0}
-    - Régimen / Diagnóstico Fiscal: ${context?.currentCase?.cliente?.regimenFiscal || 'No especificado'}
-    - Edad: ${context?.currentCase?.cliente?.edad || 'No especificada'}
-    ${context?.currentCase?.diagnostico?.servicios?.length > 0 ? `- Servicios previstos para vender al cliente: ${context.currentCase.diagnostico.servicios.map((s:any) => s.nombre).join(', ')}` : ''}
+    CONTEXTO COMPLETO DEL EXPEDIENTE DEL CLIENTE ACTUAL:
+    (La siguiente información es el estado completo de la auditoría y expediente del cliente en formato JSON estructurado)
+    ${JSON.stringify({
+      cliente: context?.currentCase?.cliente || {},
+      diagnostico: context?.currentCase?.diagnostico || {}
+    }, null, 2)}
+    
+    INFORMACIÓN RELEVANTE DESTACADA:
+    - Nombre: ${context?.currentCase?.cliente?.nombre || 'Usuario Anónimo'} (CURP: ${context?.currentCase?.cliente?.curp || 'N/A'})
+    - Domicilio y CP: ${context?.currentCase?.cliente?.domicilioExtraido || 'No especificado'} - ${context?.currentCase?.cliente?.cp || ''}
+    - Semanas IMSS: ${context?.currentCase?.cliente?.semanasCotizadas || 0} + Semanas Extra: ${context?.currentCase?.cliente?.semanasExtra || 0}
+    - Régimen / Edad: ${context?.currentCase?.cliente?.regimenFiscal || 'No especificado'} / ${context?.currentCase?.cliente?.edad || 'No especificada'}
+    - Análisis OCR/Documental: ${JSON.stringify(context?.currentCase?.cliente?.metadatosAuditoria || {}, null, 2)}
+    - Alertas Críticas / Observaciones: ${context?.currentCase?.cliente?.alertas || context?.currentCase?.cliente?.notasSeguimiento || 'Ninguna'}
+    - Servicios propuestos: ${context?.currentCase?.diagnostico?.servicios?.map((s:any) => s.nombre).join(', ') || 'Ninguno aún'}
 
     INSTRUCCIONES:
     - Evalúa las respuestas o dudas del asesor en el chat basándote puramente en la Seguridad Social Mexicana.
