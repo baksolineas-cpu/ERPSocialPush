@@ -237,10 +237,15 @@ function handleFinalizeAudit(payload) {
   if (!payload.id) payload.id = searchId;
 
   // 1. Actualizamos el registro del cliente (incluyendo estatusfirma si se envió)
-  // const res = handleCreateCliente(payload); // ELIMINADO para evitar recursión.
+  let res;
+  try {
+    res = handleCreateCliente(payload);
+  } catch(e) { logDebug("ERR_CLIENTE_UPDATE", e.toString()); }
   
   // 2. Registramos formalmente la hoja de servicio/diagnóstico
-  handleCreateHoja(payload);
+  try {
+    handleCreateHoja(payload);
+  } catch(e) { logDebug("ERR_HOJA_CREATION", e.toString()); }
 
   // 3. GENERACIÓN DE CONTRATO PERSONALIZADO (Copia del Template)
   try {
@@ -410,7 +415,7 @@ function handleGetClienteStatus(payload) {
 
       // Append hoja de servicio
       try {
-        const hojas = getSheetData("HOJAS_SERVICIO");
+        const hojas = getSheetData("hojas_de_Servicio");
         const hoja = hojas.find(h => 
           (h.clienteid && h.clienteid.toString().toUpperCase() === identifier.toString().toUpperCase()) ||
           (h.id && h.id.toString().toUpperCase() === identifier.toString().toUpperCase())
@@ -571,9 +576,9 @@ function handleCreateCliente(payload) {
 
 function handleCreateHoja(payload) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  let sheet = ss.getSheetByName("HOJAS_SERVICIO");
+  let sheet = ss.getSheetByName("hojas_de_Servicio");
   if (!sheet) {
-    sheet = ss.insertSheet("HOJAS_SERVICIO");
+    sheet = ss.insertSheet("hojas_de_Servicio");
     sheet.appendRow(["ID_Hoja", "ID_Cliente", "Universo", "Servicios", "Monto", "Diagnostico", "Status", "Fecha", "Asesor", "FirmaAsesor"]);
   }
   
@@ -586,7 +591,7 @@ function handleCreateHoja(payload) {
   }
   
   sheet.appendRow([
-    payload.id || Utilities.getUuid(),                         // A: ID Hoja (Generado si no viene)
+    Utilities.getUuid(),                                       // A: ID Hoja (Generado)
     payload.clienteId || payload.id,                          // B: ID Cliente
     payload.universo || "U1",                                  // C: Universo
     serviciosStr,                                              // D: Servicios

@@ -230,8 +230,7 @@ export default function EntrevistaHub() {
   const handleAutoSave = async () => {
     if (!data.id && !data.curp) return;
     try {
-      await callGAS('ONBOARDING_SYNC', data);
-      addToast("Guardado", "success");
+      await callGAS('CREATE_CLIENTE', data);
     } catch (e) {
       console.warn("Autosave failed", e);
     }
@@ -1207,7 +1206,7 @@ export default function EntrevistaHub() {
                     <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Semanas IMSS" value={data.semanasCotizadas} fieldKey="semanasCotizadas" isLocked={lockedFields.has('semanasCotizadas')} onUnlock={() => { const s = new Set(lockedFields); s.delete('semanasCotizadas'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.semanasCotizadas} onChange={(v:any)=>updateData({semanasCotizadas:v})} />
                     <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Último Salario" value={data.ultimoSalario} fieldKey="ultimoSalario" isLocked={lockedFields.has('ultimoSalario')} onUnlock={() => { const s = new Set(lockedFields); s.delete('ultimoSalario'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.ultimoSalario} onChange={(v:any)=>updateData({ultimoSalario:v})} />
                 </div>
-                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="WhatsApp" value={data.whatsapp} fieldKey="whatsapp" isLocked={lockedFields.has('whatsapp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('whatsapp'); setLockedFields(s); }} onChange={(v:any)=>updateData({whatsapp:v})} />
+                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="WhatsApp" value={data.whatsapp} fieldKey="whatsapp" isLocked={lockedFields.has('whatsapp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('whatsapp'); setLockedFields(s); }} hasAlert={data.whatsapp && data.whatsapp.length !== 10} onChange={(v:any)=>updateData({whatsapp:v.replace(/\D/g, '').substring(0, 10)})} />
                 <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Email de Contacto" value={data.email} fieldKey="email" isLocked={lockedFields.has('email')} onUnlock={() => { const s = new Set(lockedFields); s.delete('email'); setLockedFields(s); }} hasAlert={data.email && !VALIDATORS.EMAIL(data.email)} onChange={(v:any)=>updateData({email:v})} />
 
                 {/* CONTACTOS EXTRA DINÁMICOS */}
@@ -1258,14 +1257,16 @@ export default function EntrevistaHub() {
 
       {/* OVERLAY DE ÉXITO */}
       <AnimatePresence>
-         {(data.estatusfirma === 'FIRMADO' || data.estatusfirma === 'COMPLETADO') && (
+         {showSuccessOverlay && (
             <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-[100] bg-[#003366]/95 flex items-center justify-center p-10 text-center flex-col gap-6 backdrop-blur-md">
                <div className="bg-[#DAA520] p-8 rounded-full shadow-2xl animate-pulse"><CheckCircle size={80} className="text-[#003366]"/></div>
                <h2 className="text-5xl font-black text-white uppercase tracking-tighter">¡Expediente Formalizado!</h2>
                <p className="text-xl text-emerald-400 font-bold italic tracking-tight">Firma y Selfie recibidas. El diagnóstico y contrato han sido sellados en PDF.</p>
                
                <div className="flex flex-col md:flex-row gap-4">
-                 <button type="button" onClick={() => window.location.reload()} className="px-10 py-4 bg-white text-[#003366] rounded-full font-black uppercase tracking-widest hover:bg-slate-100 transition-all">Actualizar Expediente</button>
+  <button type="button" onClick={() => window.location.reload()} className="px-6 py-4 bg-white text-[#003366] rounded-full font-black uppercase tracking-widest hover:bg-slate-100 transition-all">Tablero Maestro</button>
+  
+  <button type="button" onClick={() => { setActiveStep(2); setShowSuccessOverlay(false); }} className="px-6 py-4 bg-[#003366] text-white border border-white/20 rounded-full font-black uppercase tracking-widest hover:bg-white/10 transition-all">Contratar más Servicios</button>
                  {data.id_carpeta_drive && (
                    <a 
                      href={`https://drive.google.com/drive/folders/${data.id_carpeta_drive}`} 
