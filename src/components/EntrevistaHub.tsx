@@ -239,7 +239,8 @@ export default function EntrevistaHub() {
         id_hoja: sessionHojaId,
         servicios: hojaServicio.servicios.map(s => s.nombre),
         monto: hojaServicio.honorariosAcordados,
-        dictamen: hojaServicio.notasDiagnostico
+        dictamen: hojaServicio.notasDiagnostico,
+        notasExtra: hojaServicio.otroServicioTexto
       });
     } catch (e) {
       console.warn("Autosave failed", e);
@@ -584,7 +585,8 @@ export default function EntrevistaHub() {
         servicios: serviciosFinales.join(', '),
         monto: hojaServicio.honorariosAcordados,
         auditLog: JSON.stringify(auditLog),
-        tipoDocEval // Send eval rule directly to backend
+        tipoDocEval,
+        notasExtra: hojaServicio.otroServicioTexto
       });
 
       if (res?.success) {
