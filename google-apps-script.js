@@ -217,7 +217,7 @@ function handleUpdateSignature(payload) {
  */
 function handleFinalizeAudit(payload) {
   logDebug("DEBUG_ENTRADA", "Payload recibido: " + JSON.stringify(payload));
-  const searchId = payload.id || payload.clienteId;
+  const searchId = payload.id || payload.clienteId || payload.curp;
   if (!payload.id) payload.id = searchId;
 
   // 1. Actualizamos el registro del cliente
@@ -225,7 +225,7 @@ function handleFinalizeAudit(payload) {
     handleCreateCliente(payload);
   } catch(e) { logDebug("ERR_CLIENTE_UPDATE", e.toString()); }
   
-  // 2. Registramos formalmente la hoja de servicio (Upsert)
+  // 2. Registramos formalmente la hoja de servicio (NUEVA FILA siempre por sessionHojaId)
   try {
     handleCreateHoja(payload);
   } catch(e) { logDebug("ERR_HOJA_CREATION", e.toString()); }
@@ -240,27 +240,78 @@ function handleFinalizeAudit(payload) {
       if (folderId) {
         const folder = DriveApp.getFolderById(folderId);
         
-        // A. RE-RESTAURACIÓN DEL CONTRATO MARCO (Template ID Especial solicitado)
-        const templateId = "12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0";
-        try {
-           const copy = DriveApp.getFileById(templateId).makeCopy('CONTRATO_MARCO_' + (payload.id_hoja || new Date().getTime()) + ' - ' + (cliente.nombre || ''), folder);
-           const doc = DocumentApp.openById(copy.getId());
-           const body = doc.getBody();
-           
-           // Inyectar datos primarios
-           body.replaceText("{{nombre_cliente}}", cliente.nombre || "");
-           body.replaceText("{{NOMBRE_CLIENTE}}", cliente.nombre || "");
-           body.replaceText("{{CURP}}", cliente.curp || "");
-           body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
-           body.replaceText("{{NSS}}", cliente.nss || "");
-           body.replaceText("{{DOMICILIO}}", cliente.domicilioextraido || "");
+        // A. CONTRATO MARCO - Solo si NO existe
+        const existingFiles = folder.getFiles();
+        let hasContrato = false;
+        while (existingFiles.hasNext()) {
+          const f = existingFiles.next();
+          if (f.getName().includes("CONTRATO_MARCO")) {
+            hasContrato = true;
+            break;
+          }
+        }
+        
+        if (!hasContrato) {
+          const templateId = "12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0";
+          try {
+             const copy = DriveApp.getFileById(templateId).makeCopy('CONTRATO_MARCO_' + (payload.id_hoja || new Date().getTime()) + ' - ' + (cliente.nombre || ''), folder);
+             const doc = DocumentApp.openById(copy.getId());
+             const body = doc.getBody();
+             
+             body.replaceText("{{nombre_cliente}}", cliente.nombre || "");
+             body.replaceText("{{NOMBRE_CLIENTE}}", cliente.nombre || "");
+             body.replaceText("{{CURP}}", cliente.curp || "");
+             body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
+             body.replaceText("{{NSS}}", cliente.nss || "");
+             body.replaceText("{{DOMICILIO}}", cliente.domicilioextraido || "");
 
-           doc.saveAndClose();
-           copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT);
-        } catch(errC) { logDebug("ERR_CLONE_CONTRATO", errC.toString()); }
+             doc.saveAndClose();
+             copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+          } catch(errC) { logDebug("ERR_CLONE_CONTRATO", errC.toString()); }
+        }
 
-        // B. GENERACIÓN DE DIAGNÓSTICO CERTIFICADO REDISEÑADO
-        generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja);
+        // B. GENERACIÓN DE DIAGNÓSTICO CERTIFICADO
+        const diagUrl = generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja);
+        
+        // C. AUTO-SELLADO (Upsell Logic)
+        // Si el cliente ya tiene firma y selfie en su folder, sellamos el diagnóstico inmediatamente
+        let prevFirma = null;
+        let prevSelfie = null;
+        const filesDrive = folder.getFiles();
+        while (filesDrive.hasNext()) {
+          const df = filesDrive.next();
+          const dName = df.getName().toUpperCase();
+          if (dName.includes("FIRMA_CLIENTE")) prevFirma = df.getBlob();
+          if (dName.includes("SELFIE")) prevSelfie = df.getBlob();
+        }
+
+        if (prevFirma && prevSelfie && diagUrl) {
+           logDebug("AUTO_SEALING", "Detectado cliente recurrente con firma. Sellando diagnóstico automáticamente.");
+           const diagId = diagUrl.split('/d/')[1].split('/')[0];
+           const docFile = DriveApp.getFileById(diagId);
+           if (docFile.getMimeType() === MimeType.GOOGLE_DOCS) {
+              const doc = DocumentApp.openById(diagId);
+              const body = doc.getBody();
+              const signatureTimestamp = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' });
+              const transactionId = "AUTO-" + Utilities.getUuid().substring(0, 8).toUpperCase();
+              
+              body.replaceText("{{FECHA_FIRMA}}", signatureTimestamp);
+              body.replaceText("{{ID_TRANSACCION}}", transactionId);
+              
+              replaceTextWithImageBlob(body, "{{firma_cliente}}", prevFirma, 220, 110);
+              replaceTextWithImageBlob(body, "{{selfie}}", prevSelfie, 140, 140);
+              
+              doc.saveAndClose();
+              
+              // Export PDF
+              const pdfBlob = docFile.getAs('application/pdf');
+              const pdfFile = folder.createFile(pdfBlob).setName(docFile.getName() + "_AUTO_FIRMADO_" + transactionId + ".pdf");
+              pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+              
+              docFile.setTrashed(true);
+              logDebug("AUTO_SEALING_COMPLETE", "Diagnóstico sellado con éxito: " + pdfFile.getUrl());
+           }
+        }
       }
     }
   } catch(e) { logDebug("ERR_DOC_GEN_MAIN", e.toString()); }
@@ -328,7 +379,7 @@ function generateDiagnosticPDF(clientData, servicesData, montoTotal, asesorName,
     
     const file = DriveApp.getFileById(doc.getId());
     file.moveTo(folder);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     
     return file.getUrl();
   } catch(e) {
@@ -950,7 +1001,7 @@ function handleOnboardingSync(payload) {
      replaceTextWithImage(body, "{{IMAGEN_SELFIE}}", payload.selfieBase64, "image/jpeg", 150, 150);
      
      doc.saveAndClose();
-     copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT);
+     copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
      
      // Convertir a PDF y guardar en la carpeta
      try {

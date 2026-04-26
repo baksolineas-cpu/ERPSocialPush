@@ -545,7 +545,7 @@ export default function EntrevistaHub() {
     } finally { setIsAiDrafting(false); }
   };
 
-  const handleSiguientePasoDictamen = () => {
+  const handleSiguientePasoDictamen = async () => {
     if (hojaServicio.servicios.length === 0 && !hojaServicio.otroServicioTexto) {
       addToast("Selecciona al menos un servicio para continuar.", 'error');
       return;
@@ -554,6 +554,7 @@ export default function EntrevistaHub() {
       addToast("El diagnóstico técnico no puede estar vacío.", 'error');
       return;
     }
+    await handleAutoSave();
     updateData({ estatusfirma: 'PENDIENTE' });
     setActiveStep(4);
   };
@@ -957,7 +958,10 @@ export default function EntrevistaHub() {
                         <textarea value={hojaServicio.notasDiagnostico} onChange={(e) => setHojaServicio(prev => ({...prev, notasDiagnostico: e.target.value}))} className="flex-1 w-full bg-slate-800 text-emerald-50 border border-slate-700 rounded-2xl p-4 text-sm font-medium leading-relaxed outline-none focus:border-emerald-500 resize-none custom-scrollbar" placeholder="El dictamen técnico final aparecerá aquí..."/>
                     </div>
                 </div>
-                <button onClick={handleSiguientePasoDictamen} className="w-full py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl flex items-center justify-center gap-3">Previsualizar y Sellar Diagnóstico <ArrowRight /></button>
+                <div className="flex gap-4">
+                  <button onClick={() => { handleAutoSave(); setActiveStep(2); }} className="px-8 py-5 bg-slate-200 text-slate-600 rounded-[24px] font-black uppercase shadow-xl hover:bg-slate-300 transition-all">Regresar</button>
+                  <button onClick={handleSiguientePasoDictamen} className="flex-1 py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl flex items-center justify-center gap-3">Previsualizar y Sellar Diagnóstico <ArrowRight /></button>
+                </div>
             </div>
         )}
 
@@ -1052,9 +1056,12 @@ export default function EntrevistaHub() {
                          )}
                          <div className="flex flex-col gap-3">
                              {!certificationReady ? (
-                                <button type="button" onClick={handleSellarExpediente} className="w-full py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-[11px] shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2 tracking-widest">
-                                  {isProcessing ? <Loader2 size={16} className="animate-spin" /> : (data.contrato_url && data.contrato_url.length > 5 ? "Sellar y Finalizar Expediente" : "Sellar y Generar Envío")} <ShieldCheck size={16}/>
-                                </button>
+                                <div className="flex gap-2">
+                                   <button type="button" onClick={() => { handleAutoSave(); setActiveStep(3); }} className="px-6 py-5 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-[10px] shadow-md hover:bg-slate-200 transition-all">Regresar</button>
+                                   <button type="button" onClick={handleSellarExpediente} className="flex-1 py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-[11px] shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2 tracking-widest">
+                                     {isProcessing ? <Loader2 size={16} className="animate-spin" /> : (data.contrato_url && data.contrato_url.length > 5 ? "Sellar y Finalizar Expediente" : "Sellar y Generar Envío")} <ShieldCheck size={16}/>
+                                   </button>
+                                </div>
                              ) : (
                                 <div className="flex gap-2">
                                   <button type="button" onClick={() => handleEnviarNotificacion('whatsapp')} className="flex-1 py-5 bg-[#25D366] text-white rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex justify-center items-center gap-2">
@@ -1259,8 +1266,11 @@ export default function EntrevistaHub() {
             
             {/* Control Flotante Inferior fijo dentro del aside */}
             {activeStep === 2 && (
-               <div className="sticky bottom-0 bg-[#003366] pt-4 border-t border-white/10 mt-auto">
-                  <button type="button" onClick={handleSiguientePasoDocs} disabled={isProcessing} className="w-full py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl hover:bg-[#c9961d] active:scale-95 transition-all flex items-center justify-center gap-3">
+               <div className="sticky bottom-0 bg-[#003366] pt-4 border-t border-white/10 mt-auto flex gap-3">
+                  <button type="button" onClick={() => { handleAutoSave(); setActiveStep(1); }} className="px-6 py-5 bg-white/10 text-white rounded-[24px] font-black uppercase shadow-xl hover:bg-white/20 transition-all">
+                      Atrás
+                  </button>
+                  <button type="button" onClick={handleSiguientePasoDocs} disabled={isProcessing} className="flex-1 py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl hover:bg-[#c9961d] active:scale-95 transition-all flex items-center justify-center gap-3">
                       {isProcessing ? <Loader2 size={18} className="animate-spin" /> : null}
                       {data.id?.startsWith('NEW_') ? "Crear Expediente" : "Siguiente Paso"} <ArrowRight size={18} />
                   </button>
