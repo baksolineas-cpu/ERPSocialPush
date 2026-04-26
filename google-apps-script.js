@@ -1,7 +1,19 @@
-const SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+// Configuración Maestra
+var SPREADSHEET_ID = ""; 
+try {
+  SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+} catch(e) {
+  // Si el script no está vinculado, el programador debe poner el ID manualmente aquí
+  // SPREADSHEET_ID = "ID_DE_TU_HOJA_AQUÍ";
+}
+
 const ROOT_FOLDER_ID = "1xzILR2Afad-feJ-CHAkNiCHjHwLocvhX"; 
 
 function logDebug(tag, message) {
+  if (!SPREADSHEET_ID) {
+    Logger.log("[" + tag + "] " + message);
+    return;
+  }
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = ss.getSheetByName("DEBUG") || ss.insertSheet("DEBUG");
@@ -946,7 +958,9 @@ function handleOnboardingSync(payload) {
   } catch(e) { logDebug("ONB_DOC_ERR", e.toString()); }
 
   return createResponse({ success: true, id: curp10, id_carpeta_drive: folderId });
-}function forzarPermisosReales() {
+}
+
+function forzarPermisosReales() {
   // Forzamos al motor a tocar la API de Docs con un documento real
   var doc = DocumentApp.openById("1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk");
   console.log("Permiso concedido para: " + doc.getName());

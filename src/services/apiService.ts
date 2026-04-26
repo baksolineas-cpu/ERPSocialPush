@@ -21,9 +21,20 @@ export async function callGAS(action: string, payload: any = {}, userEmail: stri
       return { success: true, status: 'success', warning: 'CORS_SILENT' };
     }
     
-    const result = JSON.parse(text);
-    // console.log("CONEXIÓN EXITOSA CON GAS:", result);
-    return result; 
+    try {
+      const result = JSON.parse(text);
+      return result; 
+    } catch (parseError) {
+      console.error("Error de Formato en callGAS (POST). Recibido:", text.substring(0, 500));
+      if (text.includes("<!DOCTYPE") || text.includes("<html")) {
+        return { 
+          success: false, 
+          error: "El servidor de Google devolvió una página de error (HTML). Verifica que el script esté publicado correctamente y el ID de la hoja sea válido.",
+          details: text.substring(0, 200)
+        };
+      }
+      throw parseError;
+    }
   } catch (error: any) {
     // Si sabemos que el servidor está recibiendo (confirmado por logs de Excel)
     // devolvemos éxito silencioso para no bloquear al usuario.
@@ -62,10 +73,9 @@ export async function getGASData(action: string = 'GET_ALL', params: any = {}) {
     });
     
     const text = await response.text();
-    // Identificado por el usuario como "error infinito" por la frecuencia de loggeo
-    // console.log('RESPUESTA SERVIDOR:', text);
     
     try {
+      if (!text) throw new Error("Respuesta vacía del servidor");
       const result = JSON.parse(text);
       if (result.message === "API BAKSO Activa" && action === "LOGIN") {
          throw new Error('Error de Sincronización: El script de Google no ha sido actualizado con la función de Login');
