@@ -60,6 +60,7 @@ import { useCase } from './CaseContext';
 
 export default function EntrevistaHub() {
   const { setCurrentCase } = useCase();
+  const [sessionHojaId] = useState(() => `H-${Date.now().toString().slice(-4)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
   const [activeStep, setActiveStep] = useState(1);
   const [curpSearch, setCurpSearch] = useState('');
   const [nameSearch, setNameSearch] = useState('');
@@ -194,9 +195,9 @@ export default function EntrevistaHub() {
             const remoteStatus = res.data.estatusfirma || res.data.statusSignature;
             if (['FIRMADO', 'FORMALIZADO', 'COMPLETADO'].includes(remoteStatus)) {
               updateData({ estatusfirma: 'COMPLETADO' });
-              setShowSuccessOverlay(true);
-              registrarAccion("¡Expediente completado y formalizado detectado!");
-              addToast("Expediente firmado y PDFs generados", 'success');
+              // setShowSuccessOverlay(true); // Removido por directiva (Solo vía FINALIZE_AUDIT)
+              registrarAccion("¡Firma del cliente detectada en sistema!");
+              addToast("El cliente ha firmado el documento.", 'success');
               clearInterval(interval);
             }
           } else if (res?.status === 'error') {
@@ -231,6 +232,14 @@ export default function EntrevistaHub() {
     if (!data.id && !data.curp) return;
     try {
       await callGAS('CREATE_CLIENTE', data);
+      // También guardamos progreso de la hoja actual
+      await callGAS('CREATE_HOJA', { 
+        ...data, 
+        id_hoja: sessionHojaId,
+        servicios: hojaServicio.servicios.map(s => s.nombre),
+        monto: hojaServicio.honorariosAcordados,
+        dictamen: hojaServicio.notasDiagnostico
+      });
     } catch (e) {
       console.warn("Autosave failed", e);
     }
@@ -565,6 +574,8 @@ export default function EntrevistaHub() {
       console.log("DATA_DEBUG", "Payload enviado a FINALIZE_AUDIT:", data);
       const res = await callGAS('FINALIZE_AUDIT', {
         ...data,
+        estatusfirma: 'PENDIENTE',
+        id_hoja: sessionHojaId,
         asesor: asesorNombre,
         firmaAsesor,
         dictamen: hojaServicio.notasDiagnostico,
@@ -586,6 +597,7 @@ export default function EntrevistaHub() {
          const link = `${baseUrl}/firma-externa/${realId}?tipoDoc=${tipoDoc}`;
          setFinalLink(link);
          setCertificationReady(true);
+         setShowSuccessOverlay(true);
 
          addToast("Expediente sellado y sellos generados ✓", 'success');
          registrarAccion(`Expediente Certificado. Preparado para envío (${tipoDoc}).`);

@@ -256,7 +256,7 @@ function handleFinalizeAudit(payload) {
         } catch(errC) { logDebug("ERR_CLONE_CONTRATO", errC.toString()); }
 
         // B. GENERACIÓN DE DIAGNÓSTICO CERTIFICADO REDISEÑADO
-        generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor);
+        generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja);
       }
     }
   } catch(e) { logDebug("ERR_DOC_GEN_MAIN", e.toString()); }
@@ -264,14 +264,15 @@ function handleFinalizeAudit(payload) {
   return createResponse({ success: true });
 }
 
-function generateDiagnosticPDF(clientData, servicesData, montoTotal, asesorName, firmaAsesorBase64) {
+function generateDiagnosticPDF(clientData, servicesData, montoTotal, asesorName, firmaAsesorBase64, idHoja) {
   try {
     const folderId = clientData.id_carpeta_drive || clientData.idcarpetadrive;
     if (!folderId) return;
     const folder = DriveApp.getFolderById(folderId);
 
-    // Crear Documento Temporal (Se triturará después)
-    const doc = DocumentApp.create("DIAGNOSTICO_CERTIFICADO_" + clientData.curp);
+    // Crear Documento Temporal con VERSIONAMIENTO (ID_Hoja o Timestamp)
+    const suffix = idHoja || new Date().getTime();
+    const doc = DocumentApp.create("DIAGNOSTICO_CERTIFICADO_" + clientData.curp + "_" + suffix);
     const body = doc.getBody();
 
     // 1. ENCABEZADO BAKSO S.C.
@@ -627,19 +628,22 @@ function handleCreateHoja(payload) {
     
     const data = sheet.getDataRange().getValues();
     const headers = data[0].map(h => h.toString().toLowerCase().trim());
+    const idHojaCol = headers.indexOf("id_hoja");
     const idClienteCol = headers.indexOf("id_cliente");
     
-    // Búsqueda de registro existente (Upsert)
+    // Búsqueda de registro existente (Upsert) por ID_Hoja (Columna A/0)
     let rowIndex = -1;
-    const searchId = (payload.clienteId || payload.id || "").toString().toUpperCase().trim();
-    if (searchId) {
+    const searchHojaId = (payload.id_hoja || "").toString().toUpperCase().trim();
+    if (searchHojaId) {
       for (let i = 1; i < data.length; i++) {
-        if (data[i][idClienteCol] && data[i][idClienteCol].toString().toUpperCase().trim() === searchId) {
+        if (data[i][idHojaCol] && data[i][idHojaCol].toString().toUpperCase().trim() === searchHojaId) {
           rowIndex = i;
           break;
         }
       }
     }
+    
+    const searchClienteId = (payload.clienteId || payload.id || "").toString().toUpperCase().trim();
     
     // BLINDAJE: servicios puede venir como Array o como String ya unido
     let serviciosStr = "";
@@ -650,8 +654,8 @@ function handleCreateHoja(payload) {
     }
     
     const rowData = [
-      payload.id_hoja || Utilities.getUuid(),                    // A: ID_Hoja (Generado si no existe)
-      searchId,                                                 // B: ID_Cliente
+      searchHojaId || Utilities.getUuid(),                      // A: ID_Hoja
+      searchClienteId,                                          // B: ID_Cliente
       payload.universo || "U1/U2",                              // C: Universo
       serviciosStr,                                              // D: Servicios
       payload.honorariosAcordados || payload.monto || 0,         // E: Monto
