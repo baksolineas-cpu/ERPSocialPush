@@ -153,22 +153,6 @@ function handleUpdateSignature(payload) {
                replaceTextWithImageBlob(body, "{{IMAGEN_SELFIE}}", finalSelfieBlob, 140, 140);
              }
              
-             // Layout Pro de Validación en Diagnóstico
-             if (fileName.includes("DIAGNOSTICO")) {
-               body.appendPageBreak();
-               const table = body.appendTable();
-               const row1 = table.appendTableRow();
-               row1.appendTableCell("PROTOCOLO DE VALIDEZ DIGITAL - BAKSO S.C.").setBackgroundColor("#F4F4F4").setAttributes({[DocumentApp.Attribute.BOLD]: true, [DocumentApp.Attribute.HORIZONTAL_ALIGNMENT]: DocumentApp.HorizontalAlignment.CENTER});
-               
-               const row2 = table.appendTableRow();
-               row2.appendTableCell(`ID RASTREO: ${transactionId}\nTIMESTAMP: ${signatureTimestamp}\nCERTIFICACIÓN: SOCIAL PUSH`);
-
-               const imgRow = table.appendTableRow();
-               if (finalSelfieBlob) imgRow.appendTableCell("BIOMETRÍA FACIAL\n").getChild(0).asParagraph().appendInlineImage(finalSelfieBlob).setWidth(150).setHeight(150);
-               if (finalFirmaBlob) imgRow.appendTableCell("RÚBRICA DIGITAL\n").getChild(0).asParagraph().appendInlineImage(finalFirmaBlob).setWidth(200).setHeight(100);
-               
-               table.setBorderWidth(0);
-             }
              
              doc.saveAndClose();
              
@@ -277,7 +261,7 @@ function generateDiagnosticPDF(clientData, servicesData, montoTotal) {
     const body = doc.getBody();
 
     // 1. ENCABEZADO BAKSO S.C.
-    body.insertParagraph(0, "BAKSO S.C. - SERVICIOS TÉCNICOS ESPECIALIZADOS").setHeading(DocumentApp.ParagraphHeading.HEADING1).setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    body.insertParagraph(0, "Social Push® - La Visión del Mañana...HOY").setHeading(DocumentApp.ParagraphHeading.HEADING1).setAlignment(DocumentApp.HorizontalAlignment.CENTER);
     body.appendParagraph("CERTIFICACIÓN TÉCNICA DE ESTATUS SEGURIDAD SOCIAL").setAlignment(DocumentApp.HorizontalAlignment.CENTER).setItalic(true);
     body.appendParagraph(`\nFECHA DE EMISIÓN: ${new Date().toLocaleDateString('es-MX')}`);
     body.appendParagraph(`EXPENDIENTE: ${clientData.curp || clientData.id || "SP-2024"}`);
@@ -286,7 +270,7 @@ function generateDiagnosticPDF(clientData, servicesData, montoTotal) {
     
     // 2. DIAGNÓSTICO TÉCNICO DETALLADO
     body.appendParagraph("I. EVALUACIÓN Y DICTAMEN TÉCNICO:").setBold(true);
-    const diagStr = clientData.diagnosticoTexto || clientData.dictamen || "Análisis integral de historial laboral, semanas cotizadas ante el IMSS/ISSSTE y proyección de derechos.";
+    const diagStr = clientData.diagnosticoTexto || clientData.dictamen || "Análisis integral de historial laboral, semanas cotizadas ante el IMSS y proyección de derechos.";
     body.appendParagraph(diagStr).setAttributes({[DocumentApp.Attribute.FONT_SIZE]: 10});
     
     // 3. SERVICIOS CONTRATADOS
@@ -299,7 +283,7 @@ function generateDiagnosticPDF(clientData, servicesData, montoTotal) {
     body.appendParagraph(`Inversión Total Acordada: $${Number(montoTotal || 0).toLocaleString('es-MX', {minimumFractionDigits:2})} MXN`);
     
     body.appendParagraph("\nIV. CLÁUSULA DE PRIVACIDAD Y VALIDEZ:").setBold(true);
-    body.appendParagraph("Este documento es de carácter informativo y constituye la base del proyecto de asesoría. Los datos son tratados bajo la Ley Federal de Protección de Datos Personales. Este certificado solo adquiere validez jurídica con el sello y biometría del titular.").setAttributes({[DocumentApp.Attribute.FONT_SIZE]: 8, [DocumentApp.Attribute.ITALIC]: true});
+    body.appendParagraph("Este Diagnóstico Técnico de Viabilidad de Derechos se emite bajo los estándares de materialidad fiscal de BAKSO, S.C. La identidad del solicitante ha sido validada mediante biometría facial (Selfie) y firma autógrafa digital, vinculando el presente dictamen al expediente único de cliente en nuestra bóveda de seguridad social.").setAttributes({[DocumentApp.Attribute.FONT_SIZE]: 8, [DocumentApp.Attribute.ITALIC]: true});
 
     body.appendParagraph("\n\n__________________________\nDIRECCIÓN TÉCNICA - ASESOR");
 
@@ -320,8 +304,7 @@ function generateDiagnosticPDF(clientData, servicesData, montoTotal) {
     sigRow.appendTableCell("BIOMETRÍA (SELFIE)\n\n{{selfie}}");
     table.setBorderWidth(0);
 
-    body.appendParagraph("\n\n{{IMAGEN_FIRMA}}\n{{IMAGEN_SELFIE}}").setAttributes({[DocumentApp.Attribute.FONT_SIZE]: 1});
-
+    
     doc.saveAndClose();
     
     const file = DriveApp.getFileById(doc.getId());
