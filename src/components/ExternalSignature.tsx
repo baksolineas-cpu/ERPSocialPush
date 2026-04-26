@@ -39,10 +39,10 @@ export default function ExternalSignature() {
            if (res.data.folder_url) setFolderUrl(res.data.folder_url);
            if (res.data.contrato_url) setContractUrl(res.data.contrato_url);
            // Hydrate montoTotal state if coming from payload
-           if (res.data.montoTotal) {
-             setMontoTotal(res.data.montoTotal);
+           if (res.data.montoTotal !== undefined) {
+             setMontoTotal(res.data.montoTotal.toString());
            } else if (res.data.monto) {
-             setMontoTotal(res.data.monto);
+             setMontoTotal(res.data.monto.toString());
            }
          }
       }).catch(() => setError("No se pudo cargar la información del expediente."));

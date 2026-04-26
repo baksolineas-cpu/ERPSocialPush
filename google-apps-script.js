@@ -151,9 +151,20 @@ function handleUpdateSignature(payload) {
              const doc = DocumentApp.openById(docId);
              const body = doc.getBody();
              
-             // Inyectar datos de firma
+             // Inyectar datos de firma e identidad
              body.replaceText("{{FECHA_FIRMA}}", signatureTimestamp);
              body.replaceText("{{ID_TRANSACCION}}", transactionId);
+             
+             // Etiquetas para Contrato Marco (Clean Replacement)
+             if (fileName.includes("CONTRATO_MARCO")) {
+               body.replaceText("{{NOMBRE_CLIENTE}}", rowObj.nombre || "");
+               body.replaceText("{{ NOMBRE_CLIENTE }}", rowObj.nombre || "");
+               body.replaceText("{{CURP}}", rowObj.curp || "");
+               body.replaceText("{{RFC}}", rowObj.rfc || "");
+               body.replaceText("{{NSS}}", rowObj.nss || "");
+               body.replaceText("{{DOMICILIO}}", rowObj.domicilioextraido || "");
+               body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
+             }
              
              // Estampado Seguro con Blobs (Triple Firma)
              if (finalFirmaBlob) {
@@ -230,7 +241,7 @@ function handleFinalizeAudit(payload) {
         const folder = DriveApp.getFolderById(folderId);
         
         // A. RE-RESTAURACIÓN DEL CONTRATO MARCO (Template ID Especial solicitado)
-        const templateId = "1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk";
+        const templateId = "12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0";
         try {
            const copy = DriveApp.getFileById(templateId).makeCopy('CONTRATO_MARCO_' + (payload.id_hoja || new Date().getTime()) + ' - ' + (cliente.nombre || ''), folder);
            const doc = DocumentApp.openById(copy.getId());
@@ -380,14 +391,14 @@ function doGet(e) {
           // Mapeo específico para compatibilidad con el frontend
           cliente.diagnosticoTexto = miHoja.diagnostico || miHoja.dictamen || miHoja.notasdiagnostico || miHoja.notas || "";
           cliente.serviciosContratados = miHoja.servicios || "";
-          cliente.montoAcordado = miHoja.monto || "0.00";
+          cliente.montoAcordado = miHoja.honorarios || "0.00";
           cliente.asesorAsignado = miHoja.asesor || "";
           cliente.firmaAsesor = miHoja.firmaasesor || "";
-          // Refuerzo de visualización: Si el monto viene en 0, lo forzamos a mostrar lo que hallemos en el registro (monto)
-          const finalMonto = miHoja.monto ? Number(miHoja.monto).toFixed(2) : "0.00";
-          cliente.monto = finalMonto;
+          // Refuerzo de visualización: Si el monto viene en 0, lo forzamos a mostrar lo que hallemos en el registro (honorarios)
+          const finalMonto = miHoja.honorarios ? Number(miHoja.honorarios) : 0;
+          cliente.monto = finalMonto.toFixed(2);
           cliente.montoTotal = finalMonto;
-          cliente.montoAcordado = finalMonto;
+          cliente.montoAcordado = finalMonto.toFixed(2);
         }
         
         // RESTRICCIÓN DE VISUALIZACIÓN: Usar estrictamente el ID del contrato protegido proporcionado por el usuario
