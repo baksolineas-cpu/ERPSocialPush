@@ -1,4 +1,4 @@
-const GAS_URL = "https://script.google.com/macros/s/AKfycbyn-e11dJYIpiE2fUE76EvFQlSaQBr6YXvQlwSj1IvveDqDxlhOXj9IfygmWvN30PY2/exec";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbxUDm2ms9SBJ0aiZ0tNqo0OEayawrCIVpSELm9RE5QLnLq3ZPAjwLLlv9wKAeXgDByU/exec";
 
 /**
  * Función maestra para enviar datos (POST)

@@ -22,6 +22,8 @@ export default function ExternalSignature() {
   const [selfieBase64, setSelfieBase64] = useState<string | undefined>(skipSelfieParam ? 'VALIDO' : undefined);
   const [firmaBase64, setFirmaBase64] = useState<string | undefined>();
   const [signedDocUrls, setSignedDocUrls] = useState<string[]>([]);
+  const [folderUrl, setFolderUrl] = useState<string | null>(null);
+  const [montoTotal, setMontoTotal] = useState<string>("0.00");
   const [error, setError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState(false);
   const [contractUrl, setContractUrl] = useState(`https://drive.google.com/file/d/1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk/preview`);
@@ -34,8 +36,14 @@ export default function ExternalSignature() {
       getGASData('GET_CLIENTE_STATUS', { curp: clienteId }).then(res => {
          if (res?.data) {
            setClientData(res.data);
-           // El usuario prefiere el contrato PDF por defecto (1y44...)
-           // if (res.data.contrato_url) setContractUrl(res.data.contrato_url);
+           if (res.data.folder_url) setFolderUrl(res.data.folder_url);
+           if (res.data.contrato_url) setContractUrl(res.data.contrato_url);
+           // Hydrate montoTotal state if coming from payload
+           if (res.data.montoTotal) {
+             setMontoTotal(res.data.montoTotal);
+           } else if (res.data.monto) {
+             setMontoTotal(res.data.monto);
+           }
          }
       }).catch(() => setError("No se pudo cargar la información del expediente."));
     }
@@ -64,6 +72,7 @@ export default function ExternalSignature() {
           timestamp: new Date().toISOString()
       });
       if (res?.signedDocUrls) setSignedDocUrls(res.signedDocUrls);
+      if (res?.folderUrl) setFolderUrl(res.folderUrl);
       setStep(3); // Éxito
     } catch (err) {
       setError("Fallo en la vinculación. Intente de nuevo.");
@@ -73,7 +82,7 @@ export default function ExternalSignature() {
   };
 
   if (step === 3) {
-    const waMessage = `Hola ${clientData?.nombre || 'Cliente'}. Tu expediente ha sido formalizado.\n\nPuedes descargar tus documentos aquí:\n${signedDocUrls.join('\n')}`;
+    const waMessage = `Hola ${clientData?.nombre || 'Cliente'}. Tu expediente ha sido formalizado.\n\nPuedes descargar tus documentos aquí:\n${signedDocUrls.join('\n')}${folderUrl ? `\n\nTu carpeta de expediente completa en Drive:\n${folderUrl}` : ''}`;
     const waUrl = `https://api.whatsapp.com/send?phone=${(clientData?.whatsapp || '').toString().replace(/\D/g, '')}&text=${encodeURIComponent(waMessage)}`;
 
     return (
@@ -167,7 +176,7 @@ export default function ExternalSignature() {
                  <div className="space-y-6">
                    <div className="flex items-center gap-3 border-b border-slate-100 pb-4 text-[#DAA520]">
                       <FileText size={18} />
-                      <h4 className="text-xs font-black uppercase tracking-widest font-bold">II. Diagnóstico Inicial Certificado</h4>
+                      <h4 className="text-sm font-black uppercase tracking-widest font-bold font-sans">II. Diagnóstico Inicial Certificado</h4>
                    </div>
                    <div className="bg-white p-8 md:p-12 rounded-[40px] border-2 border-slate-100 shadow-xl relative group">
                       <div className="absolute top-0 left-0 w-3 h-full bg-[#DAA520]" />
@@ -178,8 +187,11 @@ export default function ExternalSignature() {
                         </div>
                         <FileText className="text-slate-100 group-hover:text-slate-200 transition-colors" size={48} />
                       </div>
-                      <div className="text-slate-700 italic leading-relaxed whitespace-pre-wrap font-medium text-lg border-b border-slate-50 pb-6 mb-6">
-                        {clientData?.diagnosticoTexto || clientData?.hojaservicio?.diagnostico || clientData?.hojaservicio?.notasdiagnostico || clientData?.hojaservicio?.notas || "Cargando su diagnóstico personalizado..."}
+                      <div className="bg-slate-50 p-8 rounded-3xl border border-slate-100 italic text-slate-900 leading-relaxed whitespace-pre-wrap text-sm shadow-inner mb-10 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none -rotate-12"><FileText size={80} /></div>
+                        <div className="relative z-10">
+                          {clientData?.diagnosticoTexto || clientData?.hojaservicio?.diagnostico || "Cargando su diagnóstico personalizado..."}
+                        </div>
                       </div>
 
                       {clientData?.hojaservicio && (
@@ -189,7 +201,7 @@ export default function ExternalSignature() {
                              <p className="text-sm font-bold text-slate-800">{clientData.hojaservicio.servicios || 'No especificado'}</p>
                              <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center">
                                <span className="text-[10px] font-bold text-slate-400 uppercase">Monto Total Estimado</span>
-                               <span className="text-xl font-black text-[#DAA520]">${clientData.hojaservicio.monto || '0'}</span>
+                               <span className="text-xl font-black text-[#DAA520]">${montoTotal}</span>
                              </div>
                            </div>
 
