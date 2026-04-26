@@ -77,7 +77,7 @@ function handleUpdateSignature(payload) {
 
   if (rowIndex === -1) return createResponse({ success: false, error: "Cliente no encontrado" }, 404);
 
-  // 1. Guardar archivos en Drive
+  // 1. Guardar archivos físicos en Drive
   const rowObj = getSheetData("CLIENTES")[rowIndex - 1];
   const folderId = rowObj.id_carpeta_drive || rowObj.idcarpetadrive || rowObj.idCarpetaDrive;
   
@@ -98,7 +98,7 @@ function handleUpdateSignature(payload) {
   // 2. Actualizar estatus en Excel
   sheet.getRange(rowIndex + 1, estatusCol + 1).setValue("FIRMADO");
 
-  // 3. SELLAR DOCUMENTOS CON FIRMA Y SELFIE (Fusión Final)
+  // 3. SELLAR DOCUMENTOS CON BLOBS FÍSICOS
   const signedDocUrls = [];
   const signatureTimestamp = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' });
   const transactionId = Utilities.getUuid().substring(0, 8).toUpperCase();
@@ -112,7 +112,7 @@ function handleUpdateSignature(payload) {
       const folder = DriveApp.getFolderById(folderId);
       folderUrl = folder.getUrl();
       
-      // Obtener Blobs físicos de Drive para evitar colapsos de memoria por Base64
+      // Obtener Blobs físicos de Drive
       const filesDrive = folder.getFiles();
       while (filesDrive.hasNext()) {
         const df = filesDrive.next();
@@ -126,28 +126,24 @@ function handleUpdateSignature(payload) {
         const file = files.next();
         const fileName = file.getName();
         
-        const targetDocs = ["CONTRATO_PERSONALIZADO", "DIAGNOSTICO_CERTIFICADO"];
+        // Buscamos contratos y diagnósticos
+        const targetDocs = ["CONTRATO_MARCO", "CONTRATO_PERSONALIZADO", "DIAGNOSTICO_CERTIFICADO"];
         let shouldProcess = false;
-        targetDocs.forEach(td => { if (fileName.includes(td)) shouldProcess = true; });
+        targetDocs.forEach(td => { if (fileName.includes(td) && !fileName.includes("_FIRMADO_")) shouldProcess = true; });
         
         if (shouldProcess && file.getMimeType() === MimeType.GOOGLE_DOCS) {
-           logDebug("FUSING_DOC", fileName + " with ID: " + transactionId);
+           logDebug("STAMPING", "Procesando: " + fileName);
            
            try {
-             file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT);
-           } catch(shareErr) {}
-
-           try {
-             const doc = DocumentApp.openById(file.getId());
+             const docId = file.getId();
+             const doc = DocumentApp.openById(docId);
              const body = doc.getBody();
              
-             // Reemplazos de texto estandarizados
+             // Inyectar datos de firma
              body.replaceText("{{FECHA_FIRMA}}", signatureTimestamp);
              body.replaceText("{{ID_TRANSACCION}}", transactionId);
-             body.replaceText("{{NOMBRE_CLIENTE}}", rowObj.nombre || rowObj.Nombre || "");
-             body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
              
-             // FUSIÓN DE IMÁGENES SEGURA DESDE BLOBS
+             // Estampado Seguro con Blobs (Triple Firma)
              if (finalFirmaBlob) {
                replaceTextWithImageBlob(body, "{{firma_cliente}}", finalFirmaBlob, 220, 110);
                replaceTextWithImageBlob(body, "{{IMAGEN_FIRMA}}", finalFirmaBlob, 220, 110);
@@ -157,83 +153,50 @@ function handleUpdateSignature(payload) {
                replaceTextWithImageBlob(body, "{{IMAGEN_SELFIE}}", finalSelfieBlob, 140, 140);
              }
              
-             // Si es el diagnóstico, agregamos tabla de evidencia con diseño mejorado
-             if (fileName.includes("DIAGNOSTICO_CERTIFICADO")) {
+             // Layout Pro de Validación en Diagnóstico
+             if (fileName.includes("DIAGNOSTICO")) {
                body.appendPageBreak();
                const table = body.appendTable();
+               const row1 = table.appendTableRow();
+               row1.appendTableCell("PROTOCOLO DE VALIDEZ DIGITAL - BAKSO S.C.").setBackgroundColor("#F4F4F4").setAttributes({[DocumentApp.Attribute.BOLD]: true, [DocumentApp.Attribute.HORIZONTAL_ALIGNMENT]: DocumentApp.HorizontalAlignment.CENTER});
                
-               const headerRow = table.appendTableRow();
-               const headerCell = headerRow.appendTableCell("PROTOCOLO DE SEGURIDAD Y VALIDEZ DIGITAL - BAKSO S.C.");
-               headerCell.setBackgroundColor("#003366")
-                        .setAttributes({
-                          [DocumentApp.Attribute.FOREGROUND_COLOR]: "#FFFFFF",
-                          [DocumentApp.Attribute.BOLD]: true,
-                          [DocumentApp.Attribute.HORIZONTAL_ALIGNMENT]: DocumentApp.HorizontalAlignment.CENTER
-                        });
-               
-               const dataRow = table.appendTableRow();
-               dataRow.appendTableCell(`FECHA/HORA: ${signatureTimestamp}\nID RASTREO: ${transactionId}\nIP ORIGEN: ${payload.ip || "VERIFICADA"}`);
-               
+               const row2 = table.appendTableRow();
+               row2.appendTableCell(`ID RASTREO: ${transactionId}\nTIMESTAMP: ${signatureTimestamp}\nCERTIFICACIÓN: SOCIAL PUSH`);
+
                const imgRow = table.appendTableRow();
-               if (finalSelfieBlob) {
-                 const cell = imgRow.appendTableCell("EVIDENCIA FACIAL (BIOMETRÍA)\n\n");
-                 cell.appendImage(finalSelfieBlob).setWidth(160).setHeight(160);
-               }
-               if (finalFirmaBlob) {
-                 const cell = imgRow.appendTableCell("VOLUNTAD EXPRESA (RÚBRICA)\n\n");
-                 cell.appendImage(finalFirmaBlob).setWidth(180).setHeight(90);
-               }
+               if (finalSelfieBlob) imgRow.appendTableCell("BIOMETRÍA FACIAL\n").getChild(0).asParagraph().appendInlineImage(finalSelfieBlob).setWidth(150).setHeight(150);
+               if (finalFirmaBlob) imgRow.appendTableCell("RÚBRICA DIGITAL\n").getChild(0).asParagraph().appendInlineImage(finalFirmaBlob).setWidth(200).setHeight(100);
                
-               table.setBorderWidth(1).setBorderColor("#EEEEEE");
-               
-               const footerRow = table.appendTableRow();
-               footerRow.appendTableCell("Este documento constituye una prueba electrónica fehaciente de conformidad. Social Push® No Repudio.")
-                        .setAttributes({[DocumentApp.Attribute.ITALIC]: true, [DocumentApp.Attribute.FONT_SIZE]: 8});
+               table.setBorderWidth(0);
              }
              
              doc.saveAndClose();
-           } catch (docErr) {
-             throw new Error("Privilegios denegados al editar el documento Google Doc. Asegúrate de ejecutar el Web App como 'Yo'. " + docErr.toString());
-           }
-           
-           // Restaurar permisos a VIEW para el original
-           try {
-             file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-           } catch(e) {}
-           
-           // Convertir a PDF Final
-           const pdfBlob = file.getAs('application/pdf');
-           const finalPdf = folder.createFile(pdfBlob).setName(fileName + "_FIRMADO_" + transactionId + ".pdf");
-           finalPdf.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-           signedDocUrls.push(finalPdf.getUrl());
+             
+             // Generar PDF y Limpieza
+             const pdfBlob = file.getAs('application/pdf');
+             const pdfFile = folder.createFile(pdfBlob).setName(fileName + "_FIRMADO_" + transactionId + ".pdf");
+             pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+             signedDocUrls.push(pdfFile.getUrl());
+             
+             // ELIMINACION DEL DOC TEMPORAL SEGUN DIRECTIVA
+             file.setTrashed(true);
+             
+           } catch(err) { logDebug("ERR_STAMP", err.toString()); }
         }
       }
       
-      // 4. NOTIFICACIÓN POR CORREO AL CLIENTE (Si existe email)
-      const dataObj = getSheetData("CLIENTES")[rowIndex - 1];
-      const customerEmail = dataObj.email;
-      if (customerEmail && customerEmail.includes("@")) {
-         const pdfFiles = folder.getFilesByType(MimeType.PDF);
-         const attachments = [];
-         while (pdfFiles.hasNext()) {
-           const f = pdfFiles.next();
-           if (f.getName().includes("FIRMADO")) {
-             attachments.push(f.getBlob());
-           }
-         }
-         
-         if (attachments.length > 0) {
-           MailApp.sendEmail({
-             to: customerEmail,
-             subject: "Expediente Digital Formalizado - Social Push®",
-             body: `Hola ${dataObj.nombre},\n\nTu expediente digital ha sido formalizado con éxito. Adjuntamos tu Contrato Marco y Certificación de Diagnóstico en formato PDF.\n\nGracias por confiar en Social Push®.`,
-             attachments: attachments
-           });
-         }
+      // Notificar al cliente
+      if (rowObj.email) {
+        try {
+          MailApp.sendEmail({
+            to: rowObj.email,
+            subject: "Expediente Formalizado - BAKSO S.C.",
+            body: `Estimado(a) ${rowObj.nombre},\n\nSu expediente digital ha sido formalizado. Puede descargar sus documentos firmados desde su carpeta de Drive o adjuntos a este correo.\n\nCordialmente,\nEquipo BAKSO.`
+          });
+        } catch(e) {}
       }
-    } catch (e) {
-      logDebug("❌ ERROR SELLANDO O ENVIANDO DOCS", e.toString());
-    }
+
+    } catch (e) { logDebug("❌ ERR_FINAL_SIG", e.toString()); }
   }
   
   return createResponse({ success: true, signedDocUrls, folderUrl });
@@ -249,24 +212,56 @@ function handleFinalizeAudit(payload) {
   if (!payload.id) payload.id = searchId;
 
   // 1. Actualizamos el registro del cliente
-  let res;
   try {
-    res = handleCreateCliente(payload);
+    handleCreateCliente(payload);
   } catch(e) { logDebug("ERR_CLIENTE_UPDATE", e.toString()); }
   
-  // 2. Registramos formalmente la hoja de servicio
+  // 2. Registramos formalmente la hoja de servicio (Upsert)
   try {
     handleCreateHoja(payload);
   } catch(e) { logDebug("ERR_HOJA_CREATION", e.toString()); }
 
-  // 3. GENERACIÓN DE DOCUMENTO DE DIAGNÓSTICO CERTIFICADO (Aislado)
+  // 3. GENERACIÓN DE DOCUMENTOS (Diagnóstico y Contrato Marco)
   try {
     const clientes = getSheetData("CLIENTES");
     const cliente = clientes.find(c => (c.curp === (payload.curp || searchId) || c.id === searchId));
+    
     if (cliente) {
-      generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados);
+      const folderId = cliente.id_carpeta_drive || cliente.idcarpetadrive;
+      if (folderId) {
+        const folder = DriveApp.getFolderById(folderId);
+        
+        // A. RE-RESTAURACIÓN DEL CONTRATO MARCO (Template ID Especial solicitado)
+        const templateId = "1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk";
+        try {
+           // Limpieza previa
+           const oldFiles = folder.getFiles();
+           while(oldFiles.hasNext()){ 
+             const of = oldFiles.next(); 
+             if(of.getName().includes("CONTRATO_MARCO")) of.setTrashed(true); 
+           }
+
+           const copy = DriveApp.getFileById(templateId).makeCopy(`CONTRATO_MARCO - ${cliente.nombre || ""}`, folder);
+           const doc = DocumentApp.openById(copy.getId());
+           const body = doc.getBody();
+           
+           // Inyectar datos primarios
+           body.replaceText("{{nombre_cliente}}", cliente.nombre || "");
+           body.replaceText("{{NOMBRE_CLIENTE}}", cliente.nombre || "");
+           body.replaceText("{{CURP}}", cliente.curp || "");
+           body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
+           body.replaceText("{{NSS}}", cliente.nss || "");
+           body.replaceText("{{DOMICILIO}}", cliente.domicilioextraido || "");
+
+           doc.saveAndClose();
+           copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT);
+        } catch(errC) { logDebug("ERR_CLONE_CONTRATO", errC.toString()); }
+
+        // B. GENERACIÓN DE DIAGNÓSTICO CERTIFICADO REDISEÑADO
+        generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados);
+      }
     }
-  } catch(e) { logDebug("ERR_GEN_DIAG_PDF_TRIGGER", e.toString()); }
+  } catch(e) { logDebug("ERR_DOC_GEN_MAIN", e.toString()); }
 
   return createResponse({ success: true });
 }
@@ -277,39 +272,55 @@ function generateDiagnosticPDF(clientData, servicesData, montoTotal) {
     if (!folderId) return;
     const folder = DriveApp.getFolderById(folderId);
 
-    // Crear Documento Temporal
+    // Crear Documento Temporal (Se triturará después)
     const doc = DocumentApp.create("DIAGNOSTICO_CERTIFICADO_" + clientData.curp);
     const body = doc.getBody();
 
-    body.insertParagraph(0, "SOCIAL PUSH® - CERTIFICACIÓN TÉCNICA").setHeading(DocumentApp.ParagraphHeading.HEADING1).setAlignment(DocumentApp.HorizontalAlignment.CENTER);
-    body.appendParagraph(`FECHA DE EMISIÓN: ${new Date().toLocaleDateString('es-MX')}`);
-    body.appendParagraph(`CLIENTE: ${clientData.nombre || clientData.Nombre || ""}`).setBold(true);
-    body.appendParagraph(`CURP: ${clientData.curp || ""}`);
+    // 1. ENCABEZADO BAKSO S.C.
+    body.insertParagraph(0, "BAKSO S.C. - SERVICIOS TÉCNICOS ESPECIALIZADOS").setHeading(DocumentApp.ParagraphHeading.HEADING1).setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    body.appendParagraph("CERTIFICACIÓN TÉCNICA DE ESTATUS SEGURIDAD SOCIAL").setAlignment(DocumentApp.HorizontalAlignment.CENTER).setItalic(true);
+    body.appendParagraph(`\nFECHA DE EMISIÓN: ${new Date().toLocaleDateString('es-MX')}`);
+    body.appendParagraph(`EXPENDIENTE: ${clientData.curp || clientData.id || "SP-2024"}`);
     
     body.appendHorizontalRule();
-    body.appendParagraph("I. EVALUACIÓN Y DICTAMEN TÉCNICO:").setBold(true);
-    body.appendParagraph(clientData.diagnosticoTexto || clientData.dictamen || "Reporte técnico detallado de semanas cotizadas y estatus ante el IMSS/ISSSTE.");
     
+    // 2. DIAGNÓSTICO TÉCNICO DETALLADO
+    body.appendParagraph("I. EVALUACIÓN Y DICTAMEN TÉCNICO:").setBold(true);
+    const diagStr = clientData.diagnosticoTexto || clientData.dictamen || "Análisis integral de historial laboral, semanas cotizadas ante el IMSS/ISSSTE y proyección de derechos.";
+    body.appendParagraph(diagStr).setAttributes({[DocumentApp.Attribute.FONT_SIZE]: 10});
+    
+    // 3. SERVICIOS CONTRATADOS
     body.appendParagraph("\nII. SERVICIOS INTEGRALES CONTRATADOS:").setBold(true);
     let serviciosStr = Array.isArray(servicesData) ? servicesData.join(", ") : (servicesData || "Asesoría Técnica y Legal Especializada");
-    body.appendParagraph(serviciosStr);
+    body.appendParagraph(serviciosStr).setAttributes({[DocumentApp.Attribute.FONT_SIZE]: 10});
 
+    // 4. VALOR TOTAL & CLÁUSULA
     body.appendParagraph("\nIII. VALOR TOTAL DEL PROYECTO:").setBold(true);
-    body.appendParagraph(`Inversión Total: $${Number(montoTotal || 0).toFixed(2)} MXN`);
+    body.appendParagraph(`Inversión Total Acordada: $${Number(montoTotal || 0).toLocaleString('es-MX', {minimumFractionDigits:2})} MXN`);
+    
+    body.appendParagraph("\nIV. CLÁUSULA DE PRIVACIDAD Y VALIDEZ:").setBold(true);
+    body.appendParagraph("Este documento es de carácter informativo y constituye la base del proyecto de asesoría. Los datos son tratados bajo la Ley Federal de Protección de Datos Personales. Este certificado solo adquiere validez jurídica con el sello y biometría del titular.").setAttributes({[DocumentApp.Attribute.FONT_SIZE]: 8, [DocumentApp.Attribute.ITALIC]: true});
 
-    body.appendParagraph("\n\n__________________________\nDIRECCIÓN TÉCNICA - BAKSO S.C.");
+    body.appendParagraph("\n\n__________________________\nDIRECCIÓN TÉCNICA - ASESOR");
 
-    // Firma del asesor si existe
+    // Firma del asesor
     try {
-      const fa = clientData.firmaAsesor || clientData.firmaasesor || clientData.hojaservicio?.firmaasesor;
+      const fa = clientData.firmaAsesor || clientData.firmaasesor;
       if (fa && fa.length > 50) {
         const faBlob = Utilities.newBlob(Utilities.base64Decode(fa.split(",")[1]), "image/png");
-        body.appendImage(faBlob).setWidth(150).setHeight(75);
+        body.appendImage(faBlob).setWidth(140).setHeight(70);
       }
     } catch(e) {}
 
-    // Marcadores para sello posterior del cliente
-    body.appendParagraph("\n\n{{firma_cliente}}\n\n{{selfie}}\n\n{{IMAGEN_FIRMA}}\n\n{{IMAGEN_SELFIE}}").setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    // TRIPLE FIRMA AREA (Table for organization)
+    body.appendParagraph("\n\nVALIDACIÓN DIGITAL DEL TITULAR:").setBold(true).setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    const table = body.appendTable();
+    const sigRow = table.appendTableRow();
+    sigRow.appendTableCell("FIRMA DEL CLIENTE\n\n{{firma_cliente}}");
+    sigRow.appendTableCell("BIOMETRÍA (SELFIE)\n\n{{selfie}}");
+    table.setBorderWidth(0);
+
+    body.appendParagraph("\n\n{{IMAGEN_FIRMA}}\n{{IMAGEN_SELFIE}}").setAttributes({[DocumentApp.Attribute.FONT_SIZE]: 1});
 
     doc.saveAndClose();
     
@@ -911,21 +922,24 @@ function handleOnboardingSync(payload) {
 
   // 2. GENERACION AUTOMATICA DE CONTRATO (FORMATO MAESTRO) E INCRUSTACION DE FIRMA
   try {
-     const templateId = "12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0";
+     const templateId = "1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk";
      
      const oldFiles = folder.getFiles();
-     while(oldFiles.hasNext()) { const f = oldFiles.next(); if (f.getName().includes("CONTRATO_PERSONALIZADO")) f.setTrashed(true); }
+     while(oldFiles.hasNext()) { const f = oldFiles.next(); if (f.getName().includes("CONTRATO_MARCO") || f.getName().includes("CONTRATO_PERSONALIZADO")) f.setTrashed(true); }
      
-     const copy = DriveApp.getFileById(templateId).makeCopy(`CONTRATO_PERSONALIZADO_${curp10}`, folder);
+     const copy = DriveApp.getFileById(templateId).makeCopy(`CONTRATO_MARCO - ${payload.nombre || ""}`, folder);
      const doc = DocumentApp.openById(copy.getId());
      const body = doc.getBody();
      body.replaceText("{{NOMBRE_CLIENTE}}", payload.nombre || (payload.nombre + " " + payload.apellidos) || "");
+     body.replaceText("{{nombre_cliente}}", payload.nombre || (payload.nombre + " " + payload.apellidos) || "");
      body.replaceText("{{CURP}}", payload.curp || "");
      body.replaceText("{{RFC}}", payload.rfc || "");
      body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
      body.replaceText("{{DOMICILIO}}", payload.domicilioExtraido || "");
      body.replaceText("{{NSS}}", payload.nss || "");
      
+     replaceTextWithImage(body, "{{firma_cliente}}", payload.firmaBase64, "image/png", 220, 110);
+     replaceTextWithImage(body, "{{selfie}}", payload.selfieBase64, "image/jpeg", 140, 140);
      replaceTextWithImage(body, "{{IMAGEN_FIRMA}}", payload.firmaBase64, "image/png", 200, 100);
      replaceTextWithImage(body, "{{IMAGEN_SELFIE}}", payload.selfieBase64, "image/jpeg", 150, 150);
      
@@ -935,10 +949,10 @@ function handleOnboardingSync(payload) {
      // Convertir a PDF y guardar en la carpeta
      try {
        const pdfBlob = copy.getAs('application/pdf');
-       const pdfFile = folder.createFile(pdfBlob).setName(`CONTRATO_PERSONALIZADO_${curp10}.pdf`);
+       const pdfFile = folder.createFile(pdfBlob).setName(`CONTRATO_MARCO_${curp10}.pdf`);
        pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-       // Opcional: Eliminar el Google Doc original para solo dejar el PDF
-       // copy.setTrashed(true);
+       // Limpieza
+       copy.setTrashed(true);
        
        sheet.getRange(existingRowIndex > -1 ? existingRowIndex + 1 : sheet.getLastRow(), 24).setValue(pdfFile.getUrl());
      } catch (pdfErr) {
