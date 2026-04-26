@@ -447,14 +447,16 @@ function handleGetClienteStatus(payload) {
       // Append hoja de servicio
       try {
         const hojas = getSheetData("HOJAS_SERVICIO");
+        const searchId = identifier.toString().substring(0, 10).toUpperCase();
         const hoja = hojas.find(h => 
-          (h.id_cliente && h.id_cliente.toString().toUpperCase() === identifier.toString().toUpperCase()) ||
-          (h.clienteid && h.clienteid.toString().toUpperCase() === identifier.toString().toUpperCase()) ||
-          (h.idcliente && h.idcliente.toString().toUpperCase() === identifier.toString().toUpperCase()) ||
-          (h.id && h.id.toString().toUpperCase() === identifier.toString().toUpperCase())
+          (h.id_cliente && h.id_cliente.toString().toUpperCase() === searchId) ||
+          (h.clienteid && h.clienteid.toString().toUpperCase() === searchId) ||
+          (h.idcliente && h.idcliente.toString().toUpperCase() === searchId) ||
+          (h.id && h.id.toString().toUpperCase() === searchId)
         );
         if (hoja) {
           cliente.hojaservicio = hoja;
+          cliente.montoTotal = hoja.honorarios || "0.00";
         }
       } catch(e) {}
 
@@ -667,7 +669,8 @@ function handleCreateHoja(payload) {
       "ACTIVO",                                                  // G: Status
       payload.createdAt || new Date().toISOString(),             // H: Fecha
       payload.asesor || "",                                      // I: Asesor
-      payload.firmaAsesor || ""                                  // J: FirmaAsesor
+      payload.firmaAsesor || "",                                 // J: FirmaAsesor
+      payload.notasExtra || ""                                   // K: NotasExtra
     ];
     
     if (rowIndex > -1) {
@@ -927,7 +930,7 @@ function handleOnboardingSync(payload) {
 
   // 2. GENERACION AUTOMATICA DE CONTRATO (FORMATO MAESTRO) E INCRUSTACION DE FIRMA
   try {
-     const templateId = "1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk";
+     const templateId = "12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0";
      
      const oldFiles = folder.getFiles();
      while(oldFiles.hasNext()) { const f = oldFiles.next(); if (f.getName().includes("CONTRATO_MARCO") || f.getName().includes("CONTRATO_PERSONALIZADO")) f.setTrashed(true); }
@@ -938,9 +941,7 @@ function handleOnboardingSync(payload) {
      body.replaceText("{{NOMBRE_CLIENTE}}", payload.nombre || (payload.nombre + " " + payload.apellidos) || "");
      body.replaceText("{{nombre_cliente}}", payload.nombre || (payload.nombre + " " + payload.apellidos) || "");
      body.replaceText("{{CURP}}", payload.curp || "");
-     body.replaceText("{{RFC}}", payload.rfc || "");
      body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
-     body.replaceText("{{DOMICILIO}}", payload.domicilioExtraido || "");
      body.replaceText("{{NSS}}", payload.nss || "");
      
      replaceTextWithImage(body, "{{firma_cliente}}", payload.firmaBase64, "image/png", 220, 110);
@@ -972,6 +973,6 @@ function handleOnboardingSync(payload) {
 
 function forzarPermisosReales() {
   // Forzamos al motor a tocar la API de Docs con un documento real
-  var doc = DocumentApp.openById("1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk");
+  var doc = DocumentApp.openById("12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0");
   console.log("Permiso concedido para: " + doc.getName());
 }

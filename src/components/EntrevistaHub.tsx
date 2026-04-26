@@ -107,7 +107,8 @@ export default function EntrevistaHub() {
       matchDocumental: false, 
       alertas: [], 
       discrepancias: [] 
-    }
+    },
+    notasExtra: ''
   });
   
   useEffect(() => {
@@ -774,6 +775,17 @@ export default function EntrevistaHub() {
                             </div>
                           );
                         })}
+                    </div>
+                    
+                    <div className="pt-6 border-t border-slate-100">
+                      <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block mb-3">Notas Extra / Observaciones de Auditoría</label>
+                      <textarea 
+                        value={data.notasExtra || ''} 
+                        onChange={(e) => updateData({ notasExtra: e.target.value })}
+                        onBlur={handleAutoSave}
+                        placeholder="Ingresa notas adicionales sobre el estado de los documentos o el cliente..."
+                        className="w-full p-6 bg-slate-50 border border-slate-200 rounded-[32px] text-sm font-bold outline-none focus:border-[#003366] shadow-inner min-h-[120px]"
+                      />
                     </div>
                 </div>
           </div>
