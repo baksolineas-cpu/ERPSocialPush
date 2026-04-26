@@ -552,6 +552,7 @@ export default function EntrevistaHub() {
       addToast("El diagnóstico técnico no puede estar vacío.", 'error');
       return;
     }
+    updateData({ estatusfirma: 'PENDIENTE' });
     setActiveStep(4);
   };
 
@@ -948,18 +949,6 @@ export default function EntrevistaHub() {
 
         {activeStep === 4 && (
             <div className="bg-white p-12 rounded-[48px] shadow-2xl border border-slate-100 space-y-10 animate-in slide-in-from-bottom relative">
-                {/* 3. COMUNICACIÓN Y MONITOREO EN TIEMPO REAL - Bloqueo de edición */}
-                {data.estatusfirma === 'FIRMADO' && (
-                  <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-40 rounded-[48px] flex items-center justify-center p-10">
-                    <div className="bg-[#003366] text-white p-12 rounded-[40px] shadow-2xl text-center space-y-6 max-w-sm border-4 border-[#DAA520] animate-bounce">
-                      <CheckCircle2 size={80} className="text-[#DAA520] mx-auto" />
-                      <h3 className="text-2xl font-black uppercase tracking-tighter italic">¡Expediente Formalizado y Guardado con Éxito! ✅</h3>
-                      <p className="text-sm font-bold opacity-80 uppercase leading-tight">El cliente ha certificado el diagnóstico. Este caso ha sido cerrado.</p>
-                      <button onClick={() => window.confirm('¿Cerrar este caso y volver al inicio?') && window.location.reload()} className="w-full py-4 bg-[#DAA520] text-[#003366] rounded-2xl font-black uppercase tracking-widest text-xs hover:scale-105 transition-all">Panel de Inicio</button>
-                    </div>
-                  </div>
-                )}
-
                 <div className="text-center space-y-4">
                     <div className="bg-[#DAA520]/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-inner"><FileSignature size={48} className="text-[#DAA520]" /></div>
                     <h4 className="text-4xl font-black uppercase text-[#003366] tracking-tighter">3. Hoja de Diagnóstico y Servicios</h4>

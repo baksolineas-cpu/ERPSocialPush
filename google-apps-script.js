@@ -232,14 +232,7 @@ function handleFinalizeAudit(payload) {
         // A. RE-RESTAURACIÓN DEL CONTRATO MARCO (Template ID Especial solicitado)
         const templateId = "1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk";
         try {
-           // Limpieza previa
-           const oldFiles = folder.getFiles();
-           while(oldFiles.hasNext()){ 
-             const of = oldFiles.next(); 
-             if(of.getName().includes("CONTRATO_MARCO")) of.setTrashed(true); 
-           }
-
-           const copy = DriveApp.getFileById(templateId).makeCopy(`CONTRATO_MARCO - ${cliente.nombre || ""}`, folder);
+           const copy = DriveApp.getFileById(templateId).makeCopy('CONTRATO_MARCO_' + (payload.id_hoja || new Date().getTime()) + ' - ' + (cliente.nombre || ''), folder);
            const doc = DocumentApp.openById(copy.getId());
            const body = doc.getBody();
            
