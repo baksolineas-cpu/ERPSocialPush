@@ -271,6 +271,10 @@ export default function EntrevistaHub() {
   const handleAutoSave = async () => {
     if (!data.id && !data.curp) return;
     try {
+      const u2Services = hojaServicio.servicios.filter(s => s.universo === 'U2');
+      const serviciosU2 = u2Services.map(s => s.nombre).join(', ');
+      const montoU2 = u2Services.reduce((sum, s) => sum + (s.precio || 0), 0);
+
       await callGAS('CREATE_CLIENTE', data);
       // También guardamos progreso de la hoja actual
       await callGAS('CREATE_HOJA', { 
@@ -280,7 +284,9 @@ export default function EntrevistaHub() {
         servicios: hojaServicio.servicios.map(s => s.nombre),
         monto: hojaServicio.honorariosAcordados,
         dictamen: hojaServicio.notasDiagnostico,
-        notasExtra: hojaServicio.otroServicioTexto
+        notasExtra: hojaServicio.otroServicioTexto,
+        serviciosU2,
+        montoU2
       });
     } catch (e) {
       console.warn("Autosave failed", e);
@@ -608,6 +614,10 @@ export default function EntrevistaHub() {
     
     setIsProcessing(true);
     const firmaAsesor = sigCanvasAsesor.current?.getTrimmedCanvas().toDataURL('image/png');
+    const u2Services = hojaServicio.servicios.filter(s => s.universo === 'U2');
+    const serviciosU2 = u2Services.map(s => s.nombre).join(', ');
+    const montoU2 = u2Services.reduce((sum, s) => sum + (s.precio || 0), 0);
+
     const serviciosFinales = hojaServicio.servicios.map(s => {
       const nombre = s.nombre === 'Otro' ? hojaServicio.otroServicioTexto : s.nombre;
       return `${nombre} (${s.universo})`;
@@ -630,7 +640,9 @@ export default function EntrevistaHub() {
         monto: hojaServicio.honorariosAcordados,
         auditLog: JSON.stringify(auditLog),
         tipoDocEval,
-        notasExtra: hojaServicio.otroServicioTexto
+        notasExtra: hojaServicio.otroServicioTexto,
+        serviciosU2,
+        montoU2
       });
 
       if (res?.success) {

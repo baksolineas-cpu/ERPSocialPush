@@ -760,6 +760,51 @@ function handleCreateHoja(payload) {
       sheet.appendRow(rowData);
     }
     
+    // INICIO SPLIT U2 (Operaciones Recurrentes)
+    if (payload.serviciosU2 && payload.montoU2 > 0) {
+      let sheetU2 = ss.getSheetByName("GESTIONES_U2");
+      if (!sheetU2) {
+        sheetU2 = ss.insertSheet("GESTIONES_U2");
+        sheetU2.appendRow(["ID", "ClienteID", "Mes", "Estatus", "Recibido", "IMSS", "Honorarios", "ComprobanteIMSS", "FacturaHonorarios", "UpdatedAt", "Servicios_U2"]);
+      }
+      
+      const dataU2 = sheetU2.getDataRange().getValues();
+      const headersU2 = dataU2[0].map(h => h.toString().toLowerCase().trim());
+      let idColU2 = headersU2.indexOf("id");
+      if (idColU2 === -1) idColU2 = 0;
+      
+      let rowIndexU2 = -1;
+      if (searchHojaId) {
+        for (let i = 1; i < dataU2.length; i++) {
+          if (dataU2[i][idColU2] && dataU2[i][idColU2].toString().toUpperCase().trim() === searchHojaId) {
+            rowIndexU2 = i;
+            break;
+          }
+        }
+      }
+      
+      const rowDataU2 = [
+        searchHojaId || Utilities.getUuid(),                      // A: ID (Usamos el ID_Hoja para evitar duplicados en autoguardado)
+        searchClienteId,                                          // B: ClienteID
+        new Date().toLocaleString('es-MX', {month: 'long', year: 'numeric'}), // C: Mes
+        "ACTIVO",                                                 // D: Estatus
+        0,                                                        // E: Recibido
+        0,                                                        // F: IMSS
+        payload.montoU2 || 0,                                     // G: Honorarios (Solo lo de U2)
+        "",                                                       // H: ComprobanteIMSS
+        "",                                                       // I: FacturaHonorarios
+        new Date().toISOString(),                                 // J: UpdatedAt
+        payload.serviciosU2                                       // K: Servicios_U2 (Útil para saber qué se gestiona)
+      ];
+      
+      if (rowIndexU2 > -1) {
+        sheetU2.getRange(rowIndexU2 + 1, 1, 1, rowDataU2.length).setValues([rowDataU2]);
+      } else {
+        sheetU2.appendRow(rowDataU2);
+      }
+    }
+    // FIN SPLIT U2
+    
     return createResponse({ success: true });
   } finally {
     lock.releaseLock();
