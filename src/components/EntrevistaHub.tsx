@@ -15,6 +15,43 @@ import { extractDocumentData, getConsultorChatResponse } from '@/services/gemini
 import { Cliente } from '@/types';
 import { useCase } from './CaseContext';
 
+const compressImage = async (file: File): Promise<string> => {
+  if (file.type === 'application/pdf') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxWidth = 1200;
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(event.target?.result as string); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = reject;
+    };
+    reader.onerror = reject;
+  });
+};
+
   // --- SUB-COMPONENTE: INPUT DE AUDITORÍA PREMIUM ---
   function AuditoriaInput({ label, value, isLoading, isLocked, onUnlock, onChange, onBlur, hasAlert, fieldKey, registrarAccion }: any) {
     return (
@@ -369,11 +406,7 @@ export default function EntrevistaHub() {
 
     try {
       addToast(`Analizando ${type.toUpperCase()}...`, 'info');
-      const reader = new FileReader();
-      const base64 = await new Promise<string>((resolve) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(file);
-      });
+      const base64 = await compressImage(file);
       
       setFilePreviews(prev => ({ ...prev, [type]: base64 }));
       setFileProgress(prev => ({ ...prev, [type]: 30 }));

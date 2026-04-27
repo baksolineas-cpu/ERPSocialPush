@@ -188,6 +188,7 @@ function handleUpdateSignature(payload) {
              
              
              doc.saveAndClose();
+             Utilities.sleep(3000);
              
              // Generar PDF y Limpieza
              const pdfBlob = file.getAs('application/pdf');
@@ -274,7 +275,16 @@ function handleFinalizeAudit(payload) {
              body.replaceText("{{DOMICILIO}}", cliente.domicilioextraido || "");
 
              doc.saveAndClose();
-             copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+             Utilities.sleep(3000);
+             
+             try {
+               const pdfBlob = copy.getAs('application/pdf');
+               const pdfFile = folder.createFile(pdfBlob).setName(copy.getName() + ".pdf");
+               pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+               copy.setTrashed(true);
+             } catch (pdfErr) {
+               logDebug("ERR_PDF_CONTRATO", pdfErr.toString());
+             }
           } catch(errC) { logDebug("ERR_CLONE_CONTRATO", errC.toString()); }
         }
 
@@ -310,6 +320,7 @@ function handleFinalizeAudit(payload) {
               replaceTextWithImageBlob(body, "{{selfie}}", prevSelfie, 140, 140);
               
               doc.saveAndClose();
+              Utilities.sleep(3000);
               
               // Export PDF
               const pdfBlob = docFile.getAs('application/pdf');
@@ -615,6 +626,17 @@ function handleCreateCliente(payload) {
           }
        }
     }
+    
+    // START Fix Smart Folder Renaming
+    if (folderId && payload.nombre) {
+      try {
+        const folder = DriveApp.getFolderById(folderId);
+        if (folder.getName().includes("NUEVO")) {
+          folder.setName(`[${curp10}] ${payload.nombre} ${payload.apellidos || ""}`.trim());
+        }
+      } catch(e) {}
+    }
+    // END Fix Smart Folder Renaming
     mapUpdate(11, folderId);                                   // L: ID_Carpeta_Drive
     
     // PROCESAR DOCUMENTOS ENVIADOS DESDE FRONTEND (Si existen)
@@ -1022,7 +1044,7 @@ function handleOnboardingSync(payload) {
      replaceTextWithImage(body, "{{IMAGEN_SELFIE}}", payload.selfieBase64, "image/jpeg", 150, 150);
      
      doc.saveAndClose();
-     copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+     Utilities.sleep(3000);
      
      // Convertir a PDF y guardar en la carpeta
      try {

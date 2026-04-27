@@ -27,6 +27,43 @@ import jsPDF from 'jspdf';
 import { GoogleGenAI, Type } from "@google/genai";
 import { cn } from '../lib/utils';
 
+const compressImage = async (file: File): Promise<string> => {
+  if (file.type === 'application/pdf') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxWidth = 1200;
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(event.target?.result as string); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = reject;
+    };
+    reader.onerror = reject;
+  });
+};
+
 // Constantes y Configuración
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -84,25 +121,22 @@ export default function OnboardingExpress() {
     setActiveUploadId(type);
     setOcrStatus('loading');
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64 = (reader.result as string).split(',')[1];
+    try {
+      const compressedBase64URL = await compressImage(file);
+      const base64 = compressedBase64URL.split(',')[1];
       const mimeType = file.type;
       
-      setUploadedFiles(prev => ({ ...prev, [type]: reader.result as string }));
+      setUploadedFiles(prev => ({ ...prev, [type]: compressedBase64URL }));
 
       // Intentar extraer datos según el tipo
-      try {
-        await runOCR(base64, mimeType, type);
-      } catch (err) {
-        console.error("OCR Error:", err);
-        setOcrStatus('error');
-      } finally {
-        setIsUploading(false);
-        setActiveUploadId(null);
-      }
-    };
-    reader.readAsDataURL(file);
+      await runOCR(base64, mimeType, type);
+    } catch (err) {
+      console.error("OCR Error:", err);
+      setOcrStatus('error');
+    } finally {
+      setIsUploading(false);
+      setActiveUploadId(null);
+    }
   };
 
   const removeFile = (id: string) => {
