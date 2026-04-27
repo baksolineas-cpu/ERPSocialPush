@@ -408,9 +408,17 @@ export default function OperacionesDashboard() {
                               
                               {client.contrato_url ? (
                                 <button 
-                                  onClick={() => window.open(client.contrato_url, '_blank')}
+                                  onClick={() => {
+                                    // Intenta buscar el diagnóstico en los metadatos o abre carpeta como fallback
+                                    const driveId = client.id_carpeta_drive || client.idcarpetadrive;
+                                    if (client.link_diagnostico) {
+                                      window.open(client.link_diagnostico, '_blank');
+                                    } else if (driveId) {
+                                      window.open(`https://drive.google.com/drive/folders/${driveId}`, '_blank');
+                                    }
+                                  }}
                                   className="p-2 hover:bg-white/10 rounded-xl text-gold transition-all hover:scale-110" 
-                                  title="Ver Contrato"
+                                  title="Ver Diagnóstico / Contrato"
                                 >
                                   <FileText size={18} />
                                 </button>
@@ -431,7 +439,7 @@ export default function OperacionesDashboard() {
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <section className="bg-white/5 rounded-[32px] border border-white/10 overflow-hidden backdrop-blur-md shadow-2xl">
                <div className="p-8 border-b border-white/5 flex items-center justify-between">
-                 <h2 className="text-xl font-black text-gold italic uppercase tracking-tight">Semáforo de Pagos U2</h2>
+                 <h2 className="text-xl font-black text-gold italic uppercase tracking-tight">Semáforo de Pagos {activeTab === 'pagos_u2' ? 'Integrales' : ''}</h2>
                  <p className="text-[10px] text-white/30 font-black uppercase tracking-widest">Estado por Mes: {new Date().toLocaleString('es-MX', { month: 'long', year: 'numeric' })}</p>
                </div>
                
@@ -463,7 +471,9 @@ export default function OperacionesDashboard() {
                            <td className="px-8 py-6">
                              <div className={cn(
                                "px-4 py-1.5 rounded-full text-[9px] font-black border text-center w-fit uppercase tracking-widest",
-                               g.Estatus === 'ACTIVO' ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400" : "border-slate-500/20 bg-white/5 text-white/40"
+                               g.Estatus === 'ACTIVO' ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400" : 
+                               g.Estatus === 'PAGADO' ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]" :
+                               "border-slate-500/20 bg-white/5 text-white/40"
                              )}>
                                {g.Estatus || 'SIN TICKET'}
                              </div>
@@ -488,7 +498,7 @@ export default function OperacionesDashboard() {
                              <div className="p-4 bg-white/5 rounded-full text-white/20">
                                <Smartphone size={32} />
                              </div>
-                             <p className="text-[10px] font-black text-white/30 uppercase tracking-widest">No hay gestiones U2 registradas este mes.</p>
+                             <p className="text-[10px] font-black text-white/30 uppercase tracking-widest">No hay gestiones integrales registradas este mes.</p>
                            </div>
                          </td>
                        </tr>
@@ -679,7 +689,6 @@ export default function OperacionesDashboard() {
                   <p className="text-[9px] text-white/20 font-black uppercase tracking-widest mt-1">Haz clic para adjuntar archivos</p>
                 </div>
                 <input type="file" multiple accept=".pdf,image/*" ref={migrationFileInputRef} onChange={handleMigrationFileUpload} className="hidden" />
-                <input type="file" accept=".pdf,image/*" ref={paymentInputRef} onChange={handlePaymentUpload} className="hidden" />
                 {migrationFiles.length > 0 && (
                   <div className="w-full mt-4 space-y-2">
                     {migrationFiles.map((f, i) => (
@@ -708,6 +717,9 @@ export default function OperacionesDashboard() {
           </div>
         )}
       </AnimatePresence>
+      
+      <input type="file" accept=".pdf,image/*" ref={paymentInputRef} onChange={handlePaymentUpload} className="hidden" />
+
       <AnimatePresence>
         {showWAModal && (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">

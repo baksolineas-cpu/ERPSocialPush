@@ -1,23 +1,46 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
   Users, 
   TrendingUp, 
   Target, 
   Calendar,
-  Send,
-  Video,
+  DollarSign,
+  Upload,
+  Search,
+  FolderOpen,
   CheckCircle2,
   Clock,
-  DollarSign,
-  Upload
+  X,
+  FileText
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { callGAS } from '@/services/apiService';
+import { Cliente } from '@/types';
 
 export default function AsesoriaAcompanamientoDashboard() {
+  const [clients, setClients] = useState<Cliente[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  
   const paymentInputRef = useRef<HTMLInputElement>(null);
   const [uploadingPaymentFor, setUploadingPaymentFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const res = await callGAS('GET_DATA', { sheetName: 'CLIENTES' });
+      if (res?.success) setClients(res.data);
+    } catch (err) {
+      console.error("Error fetching advisory data", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handlePaymentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0] && uploadingPaymentFor) {
@@ -30,13 +53,11 @@ export default function AsesoriaAcompanamientoDashboard() {
       reader.onload = async (event) => {
         const fileData = event.target?.result as string;
         try {
-          // Buscamos info del cliente (aquí asumiendo que el ID es el del lead para simplificar el flujo)
-          const res = await callGAS('GET_CLIENTE_STATUS', { clienteId: clientId });
-          const clientData = res?.data;
-          const folderId = clientData?.id_carpeta_drive || clientData?.idcarpetadrive;
+          const clientFilter = clients.find(c => c.id === clientId);
+          const folderId = clientFilter?.id_carpeta_drive || clientFilter?.idcarpetadrive;
           
           if (!folderId) {
-             alert("No se encontró carpeta de Drive. ¿Ya se creó el expediente?");
+             alert("No se encontró carpeta de Drive. Asegúrate de que el expediente esté creado.");
              return;
           }
 
@@ -49,6 +70,7 @@ export default function AsesoriaAcompanamientoDashboard() {
           if (uploadRes?.success) {
             const recordRes = await callGAS('RECORD_PAYMENT', { clienteId: clientId });
             if (recordRes?.success) {
+              fetchData();
               alert("Pago registrado y expediente activado exitosamente.");
             }
           }
@@ -62,71 +84,58 @@ export default function AsesoriaAcompanamientoDashboard() {
     }
   };
 
-  const kpis = [
-    { label: 'Leads Recibidos vs. Contactados', value: '85%', subValue: '210/247', icon: TrendingUp, color: 'text-blue-400', bg: 'bg-blue-400/10' },
-    { label: 'Contactados vs. Entrevistas', value: '42%', subValue: '88/210', icon: Target, color: 'text-gold', bg: 'bg-gold/10' },
-  ];
+  const filteredClients = clients.filter(c => {
+    const searchLower = searchTerm.toLowerCase();
+    const fullName = `${c.nombre} ${c.apellidos}`.toLowerCase();
+    return fullName.includes(searchLower) || (c.id && c.id.toLowerCase().includes(searchLower)) || (c.curp && c.curp.toLowerCase().includes(searchLower));
+  });
 
-  const leads = [
-    { id: 'L-101', nombre: 'Juan Pérez', origen: 'Facebook Ads', fecha: '2026-04-25', estatus: 'PENDIENTE' },
-    { id: 'L-102', nombre: 'María García', origen: 'WhatsApp', fecha: '2026-04-26', estatus: 'CONTACTADO' },
-    { id: 'L-103', nombre: 'Roberto Sánchez', origen: 'Recomendación', fecha: '2026-04-27', estatus: 'CITA_AGENDADA' },
-    { id: 'L-104', nombre: 'Elena Mendoza', origen: 'Web Form', fecha: '2026-04-27', estatus: 'PENDIENTE' },
-  ];
+  const getUniversoLabel = (estado: string | undefined) => {
+    if (!estado) return 'Por Definir';
+    return estado.includes('U2') ? 'Servicios Integrales' : 'Servicios Individuales';
+  };
 
   return (
     <div className="min-h-screen bg-[#0A0D14] text-white p-8">
       <header className="mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <h1 className="text-4xl font-black italic tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-white to-gold">Asesoría & Acompañamiento</h1>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mt-1">Gestión de Leads y Primer Contacto</p>
+          <h1 className="text-4xl font-black italic tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-white to-gold py-2">Asesoría & Acompañamiento Estratégico</h1>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mt-1">Centro de Activación y Seguimiento de Consultoría</p>
         </div>
-        <button 
-          onClick={() => window.open('https://calendar.app.google/xhQAeqCHTCsdgBei6', '_blank')}
-          className="bg-gold text-black px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-[0_0_30px_rgba(218,165,32,0.3)] hover:scale-105 transition-all flex items-center gap-3"
-        >
-          <Calendar size={18} /> Agendar Cita de Valoración
-        </button>
+        <div className="flex gap-4">
+          <button 
+            onClick={() => window.open('https://calendar.app.google/xhQAeqCHTCsdgBei6', '_blank')}
+            className="bg-gold text-black px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-[0_0_30px_rgba(218,165,32,0.3)] hover:scale-105 transition-all flex items-center gap-3"
+          >
+            <Calendar size={18} /> Agendar Cita de Valoración
+          </button>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        {/* Left Column: Leads & KPIs */}
         <div className="xl:col-span-2 space-y-8">
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {kpis.map((kpi, idx) => (
-              <motion.div 
-                key={idx}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.1 }}
-                className="bg-white/5 p-8 rounded-[32px] border border-white/10 shadow-2xl flex items-center gap-6 backdrop-blur-md"
-              >
-                <div className={cn("w-16 h-16 rounded-2xl flex items-center justify-center", kpi.bg)}>
-                  <kpi.icon className={kpi.color} size={32} />
-                </div>
-                <div>
-                  <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-1">{kpi.label}</p>
-                  <div className="flex items-baseline gap-3">
-                    <span className="text-3xl font-black text-white">{kpi.value}</span>
-                    <span className="text-xs font-bold text-white/20">{kpi.subValue}</span>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-
-          {/* Leads Table */}
+          {/* Monitor de Clientes Activos */}
           <section className="bg-white/5 rounded-[40px] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-md">
-            <div className="p-8 border-b border-white/5 flex items-center justify-between">
+            <div className="p-8 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-gold/10 rounded-2xl flex items-center justify-center text-gold border border-gold/20">
                   <Users size={24} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-black text-white uppercase tracking-tight italic">Prospectos / Leads Recientes</h3>
-                  <p className="text-[9px] text-white/30 font-black uppercase tracking-widest">Seguimiento de Embudo de Ventas</p>
+                  <h3 className="text-lg font-black text-white uppercase tracking-tight italic">Monitor de Clientes Activos</h3>
+                  <p className="text-[9px] text-white/30 font-black uppercase tracking-widest">Seguimiento de Expedientes y Firmas</p>
                 </div>
+              </div>
+              
+              <div className="relative w-full md:w-72 group">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-gold transition-colors" size={16} />
+                <input 
+                  type="text" 
+                  placeholder="Buscar cliente..." 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-12 pr-4 py-3 bg-white/5 border border-white/10 rounded-2xl outline-none focus:border-gold/50 transition-all text-xs font-bold uppercase tracking-widest"
+                />
               </div>
             </div>
 
@@ -134,53 +143,80 @@ export default function AsesoriaAcompanamientoDashboard() {
               <table className="w-full text-left">
                 <thead>
                   <tr className="bg-white/5">
-                    <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Lead / Fecha</th>
-                    <th className="px-8 py-4 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Origen</th>
-                    <th className="px-8 py-4 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Estatus</th>
-                    <th className="px-8 py-4 text-[10px] font-black text-white/30 uppercase tracking-[0.2em] text-right">Acción</th>
+                    <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Cliente / ID</th>
+                    <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Tipo de Servicio</th>
+                    <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Estatus Firma</th>
+                    <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em] text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {leads.map((lead, i) => (
-                    <tr key={i} className="hover:bg-white/10 transition-colors">
-                      <td className="px-8 py-6">
-                        <div className="flex flex-col">
-                          <span className="text-xs font-black text-white tracking-widest uppercase">{lead.nombre}</span>
-                          <span className="text-[9px] font-bold text-white/30 italic">{lead.fecha}</span>
-                        </div>
-                      </td>
-                      <td className="px-8 py-6">
-                        <span className="text-[10px] font-black text-white/60 tracking-widest uppercase">{lead.origen}</span>
-                      </td>
-                      <td className="px-8 py-6">
-                        <span className={cn(
-                          "text-[9px] font-black uppercase px-3 py-1 rounded-lg border",
-                          lead.estatus === 'CITA_AGENDADA' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]" :
-                          lead.estatus === 'PENDIENTE' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                          "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                        )}>
-                          {lead.estatus}
-                        </span>
-                      </td>
-                      <td className="px-8 py-6 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button 
-                            onClick={() => {
-                              setUploadingPaymentFor(lead.id);
-                              paymentInputRef.current?.click();
-                            }}
-                            className="p-2 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-xl transition-all"
-                            title="Subir Comprobante de Pago Inicial"
-                          >
-                            <DollarSign size={16} />
-                          </button>
-                          <button className="bg-white/5 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-gold hover:text-black transition-all shadow-xl">
-                            Gestionar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {loading ? (
+                    <tr><td colSpan={4} className="py-20 text-center text-white/20 animate-pulse font-black uppercase text-xs tracking-widest">Sincronizando expedientes...</td></tr>
+                  ) : filteredClients.length > 0 ? (
+                    filteredClients.map((client, i) => {
+                      const id_carpeta = client.id_carpeta_drive || client.idcarpetadrive;
+                      const hasSigned = client.firmadigital === 'FIRMADO' || client.estadoauditoria === 'SERVICIO_ACTIVO';
+                      
+                      return (
+                        <tr key={i} className="hover:bg-white/10 transition-colors">
+                          <td className="px-8 py-6">
+                            <div className="flex flex-col">
+                              <span className="text-xs font-black text-white tracking-widest uppercase">{client.nombre} {client.apellidos}</span>
+                              <span className="text-[9px] font-bold text-white/30 italic">{client.id || client.curp}</span>
+                            </div>
+                          </td>
+                          <td className="px-8 py-6">
+                            <span className="text-[10px] font-black px-3 py-1 bg-white/5 text-white/60 rounded-lg border border-white/10 uppercase tracking-widest">
+                              {getUniversoLabel(client.estadoauditoria)}
+                            </span>
+                          </td>
+                          <td className="px-8 py-6">
+                            <div className="flex items-center gap-2">
+                              {hasSigned ? (
+                                <>
+                                  <CheckCircle2 size={14} className="text-emerald-400" />
+                                  <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest font-mono">Contrato Firmado</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Clock size={14} className="text-amber-400" />
+                                  <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest font-mono">Pendiente de Firma</span>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-8 py-6 text-right">
+                            <div className="flex justify-end gap-3">
+                              {client.estadoauditoria !== 'SERVICIO_ACTIVO' && (
+                                <button 
+                                  onClick={() => {
+                                    setUploadingPaymentFor(client.id || client.curp || '');
+                                    paymentInputRef.current?.click();
+                                  }}
+                                  className="p-2.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-black rounded-xl transition-all shadow-xl hover:shadow-emerald-500/20"
+                                  title="Activar Contrato (Subir Pago Inicial)"
+                                >
+                                  <DollarSign size={18} />
+                                </button>
+                              )}
+                              
+                              {id_carpeta && (
+                                <button 
+                                  onClick={() => window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank')}
+                                  className="p-2.5 bg-blue-500/10 text-blue-400 hover:bg-blue-400 hover:text-black rounded-xl transition-all"
+                                  title="Abrir Expediente Drive"
+                                >
+                                  <FolderOpen size={18} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr><td colSpan={4} className="py-20 text-center text-white/20 font-black uppercase text-xs tracking-widest">No se encontraron clientes activos</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -190,15 +226,15 @@ export default function AsesoriaAcompanamientoDashboard() {
 
         {/* Right Column: Sidebar / Calendar */}
         <div className="space-y-8">
-           <section className="bg-white/5 rounded-[40px] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-md h-full min-h-[600px] flex flex-col">
+           <section className="bg-white/5 rounded-[40px] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-md h-[700px] flex flex-col">
               <div className="p-8 border-b border-white/5 bg-white/5">
                  <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-400 border border-blue-500/20">
                        <Calendar size={24} />
                     </div>
                     <div>
-                       <h3 className="text-lg font-black text-white uppercase tracking-tight italic">Disponibilidad</h3>
-                       <p className="text-[9px] text-white/30 font-black uppercase tracking-widest">Calendario de Citas Social Push</p>
+                       <h3 className="text-lg font-black text-white uppercase tracking-tight italic">Citas de Valoración</h3>
+                       <p className="text-[9px] text-white/30 font-black uppercase tracking-widest">Calendario Estratégico Social Push</p>
                     </div>
                  </div>
               </div>
