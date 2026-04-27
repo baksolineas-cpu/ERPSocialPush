@@ -5,7 +5,7 @@ import Clientes from './components/Clientes';
 import HojasDeServicio from './components/HojasDeServicio';
 import GestionU2 from './components/GestionU2';
 import EntrevistaHub from './components/EntrevistaHub';
-import PromocionDashboard from './components/PromocionDashboard';
+import AsesoriaAcompanamientoDashboard from './components/AsesoriaAcompanamientoDashboard';
 import OperacionesDashboard from './components/OperacionesDashboard';
 import TesoreriaDashboard from './components/TesoreriaDashboard';
 import ContabilidadDashboard from './components/ContabilidadDashboard';
@@ -17,10 +17,12 @@ import Login from './components/Login';
 import AISidebar from './components/AISidebar';
 import { AuthProvider, useAuth } from './components/AuthProvider';
 import { CaseProvider, useCase } from './components/CaseContext';
+import { useLocation } from 'react-router-dom';
 
 function AppRoutes() {
   const { user, loading } = useAuth();
   const { currentCase } = useCase();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -29,6 +31,8 @@ function AppRoutes() {
       </div>
     );
   }
+
+  const isInterviewRoute = location.pathname === '/entrevista';
 
   return (
     <Routes>
@@ -47,7 +51,7 @@ function AppRoutes() {
             <Routes>
               <Route path="/" element={user.role === 'Admin' ? <Dashboard /> : <Navigate to="/entrevista" />} />
               <Route path="/entrevista" element={<EntrevistaHub />} />
-              <Route path="/promocion" element={<PromocionDashboard />} />
+              <Route path="/asesoria" element={<AsesoriaAcompanamientoDashboard />} />
               <Route path="/operaciones" element={user.role === 'Admin' ? <OperacionesDashboard /> : <Navigate to="/entrevista" />} />
               <Route path="/tesoreria" element={user.role === 'Admin' ? <TesoreriaDashboard /> : <Navigate to="/entrevista" />} />
               <Route path="/contabilidad" element={user.role === 'Admin' ? <ContabilidadDashboard /> : <Navigate to="/entrevista" />} />
@@ -56,7 +60,7 @@ function AppRoutes() {
               <Route path="/hojas" element={user.role === 'Admin' ? <HojasDeServicio /> : <Navigate to="/entrevista" />} />
               <Route path="/gestion" element={user.role === 'Admin' ? <GestionU2 /> : <Navigate to="/entrevista" />} />
             </Routes>
-            <AISidebar context={{ user, currentCase }} />
+            {isInterviewRoute && <AISidebar context={{ user, currentCase }} />}
           </Layout>
         ) : (
           <Navigate to="/login" />

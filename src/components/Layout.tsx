@@ -34,7 +34,7 @@ export default function Layout({ children }: LayoutProps) {
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['Admin'] },
     { name: 'Entrevista Hub', href: '/entrevista', icon: Activity, roles: ['Admin', 'Promoción'] },
-    { name: 'Promoción', href: '/promocion', icon: Megaphone, roles: ['Admin', 'Promoción'] },
+    { name: 'Asesoría', href: '/asesoria', icon: Megaphone, roles: ['Admin', 'Promoción'] },
     { name: 'Operaciones', href: '/operaciones', icon: Briefcase, roles: ['Admin'] },
     { name: 'Tesorería', href: '/tesoreria', icon: DollarSign, roles: ['Admin'] },
     { name: 'Contabilidad', href: '/contabilidad', icon: BookOpen, roles: ['Admin'] },

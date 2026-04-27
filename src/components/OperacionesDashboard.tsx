@@ -18,7 +18,10 @@ import {
   Upload,
   X,
   Check,
-  ChevronDown
+  ChevronDown,
+  Calendar,
+  ShieldPlus,
+  Loader2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { callGAS } from '@/services/apiService';
@@ -40,6 +43,16 @@ export default function OperacionesDashboard() {
   // Modal WhatsApp
   const [showWAModal, setShowWAModal] = useState(false);
   const [selectedClientForWA, setSelectedClientForWA] = useState<any>(null);
+
+  // Modal Migración
+  const [showMigrationModal, setShowMigrationModal] = useState(false);
+  const [migrationData, setMigrationData] = useState({
+    nombre: '',
+    apellidos: '',
+    curp: '',
+    whatsapp: ''
+  });
+  const [isSavingMigration, setIsSavingMigration] = useState(false);
 
   // Conciliación
   const [csvData, setCsvData] = useState<any[]>([]);
@@ -135,6 +148,30 @@ export default function OperacionesDashboard() {
     reader.readAsText(file);
   };
 
+  const handleSaveMigration = async () => {
+    if (!migrationData.nombre || !migrationData.apellidos || !migrationData.curp || migrationData.whatsapp.length !== 10) {
+      alert("Por favor completa todos los campos correctamente. WhatsApp debe ser de 10 dígitos.");
+      return;
+    }
+    setIsSavingMigration(true);
+    try {
+      const res = await callGAS('CREATE_CLIENTE', {
+        ...migrationData,
+        estadoauditoria: 'MIGRACION_PENDIENTE',
+        promotor: 'OPERACIONES_MIGRACION'
+      });
+      if (res?.success) {
+        setShowMigrationModal(false);
+        setMigrationData({ nombre: '', apellidos: '', curp: '', whatsapp: '' });
+        fetchData();
+      }
+    } catch (e) {
+      console.error("Error saving migration", e);
+    } finally {
+      setIsSavingMigration(false);
+    }
+  };
+
   const findSuggestedClient = (concepto: string) => {
     const term = concepto.toUpperCase();
     // Intenta buscar por ID o Nombre
@@ -147,6 +184,19 @@ export default function OperacionesDashboard() {
     return match ? `${match.nombre} ${match.apellidos}` : 'No Identificado';
   };
 
+  const getClientUniverso = (clientId: string) => {
+    // Busca la hoja más reciente para este cliente
+    const clientHojas = hojas
+      .filter(h => h.clienteId === clientId)
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    
+    if (clientHojas.length > 0) {
+      const h = clientHojas[0];
+      return h.universo || 'U1';
+    }
+    return 'SIN REGISTRO';
+  };
+
   return (
     <div className="min-h-screen bg-[#0A0D14] text-white p-8">
       <header className="mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -156,7 +206,7 @@ export default function OperacionesDashboard() {
         </div>
         
         <div className="flex bg-white/5 p-1 rounded-2xl border border-white/10 shadow-2xl">
-          {(['clientes', 'pagos_u2', 'conciliacion'] as Tab[]).map((tab) => (
+          {(['clientes', 'pagos_u2', 'conciliacion', 'calendario'] as Tab[] | any[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -174,8 +224,8 @@ export default function OperacionesDashboard() {
       <main>
         {activeTab === 'clientes' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="flex flex-col md:flex-row gap-4 mb-8">
-              <div className="relative flex-1 group">
+            <div className="flex flex-col md:flex-row gap-4 mb-8 items-center">
+              <div className="relative flex-1 group w-full">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-gold transition-colors" size={18} />
                 <input 
                   type="text" 
@@ -199,6 +249,12 @@ export default function OperacionesDashboard() {
                 </select>
                 <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-white/20 pointer-events-none" size={16} />
               </div>
+              <button 
+                onClick={() => setShowMigrationModal(true)}
+                className="bg-gold text-black px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-105 transition-all flex items-center gap-2"
+              >
+                <ShieldPlus size={18} /> Nuevo Expediente Migración
+              </button>
             </div>
 
             <section className="bg-white/5 rounded-[32px] border border-white/10 overflow-hidden backdrop-blur-md shadow-2xl">
@@ -226,7 +282,7 @@ export default function OperacionesDashboard() {
                           </td>
                           <td className="px-8 py-6">
                             <span className="text-[10px] font-black bg-white/10 text-white px-3 py-1 rounded-lg uppercase tracking-widest">
-                              {client.serviciosSeleccionados?.some(s => s.includes('U2')) ? 'MIXTO / U2' : 'U1'}
+                              {getClientUniverso(client.id || '')}
                             </span>
                           </td>
                           <td className="px-8 py-6">
@@ -434,9 +490,121 @@ export default function OperacionesDashboard() {
             )}
           </div>
         )}
+        {activeTab === ('calendario' as any) && (
+           <div className="h-[700px] bg-white rounded-[40px] border border-white/10 overflow-hidden shadow-2xl relative animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <iframe 
+                src="https://calendar.google.com/calendar/embed?height=600&wkst=1&bgcolor=%23ffffff&ctz=America%2FMexico_City&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=0&showCalendars=0&showTz=1&mode=WEEK" 
+                style={{ border: 0 }} 
+                width="100%" 
+                height="100%" 
+                frameBorder="0" 
+                scrolling="no"
+                className="grayscale brightness-90 contrast-125 invert-0 filter-none"
+              />
+              <div className="absolute inset-0 pointer-events-none border-[20px] border-[#0A0D14]" />
+           </div>
+        )}
       </main>
 
-      {/* Modal WhatsApp Reminders */}
+      {/* Modal Nuevo Expediente Migración */}
+      <AnimatePresence>
+        {showMigrationModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-[#0A0D14]/95 backdrop-blur-md"
+              onClick={() => setShowMigrationModal(false)}
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-2xl bg-[#141821] border border-white/10 rounded-[40px] shadow-2xl p-10 overflow-hidden"
+            >
+              <div className="absolute -top-24 -right-24 w-64 h-64 bg-gold/5 rounded-full blur-3xl" />
+              
+              <div className="flex justify-between items-start mb-8 relative">
+                <div>
+                  <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">Nuevo Expediente Migración</h3>
+                  <p className="text-[10px] text-gold font-black uppercase tracking-[0.2em] mt-1 italic">Ingreso de clientes con documentos previos</p>
+                </div>
+                <button onClick={() => setShowMigrationModal(false)} className="p-2 text-white/20 hover:text-white transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Nombre(s)</label>
+                  <input 
+                    type="text" 
+                    value={migrationData.nombre}
+                    onChange={(e) => setMigrationData({ ...migrationData, nombre: e.target.value })}
+                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-gold/30 text-xs font-bold uppercase"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Apellidos</label>
+                  <input 
+                    type="text" 
+                    value={migrationData.apellidos}
+                    onChange={(e) => setMigrationData({ ...migrationData, apellidos: e.target.value })}
+                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-gold/30 text-xs font-bold uppercase"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">CURP</label>
+                  <input 
+                    type="text" 
+                    maxLength={18}
+                    value={migrationData.curp}
+                    onChange={(e) => setMigrationData({ ...migrationData, curp: e.target.value.toUpperCase() })}
+                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-gold/30 text-xs font-bold uppercase"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">WhatsApp (10 dígitos)</label>
+                  <input 
+                    type="text" 
+                    maxLength={10}
+                    value={migrationData.whatsapp}
+                    onChange={(e) => setMigrationData({ ...migrationData, whatsapp: e.target.value.replace(/\D/g, '') })}
+                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-gold/30 text-xs font-bold uppercase"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-8 p-8 border-2 border-dashed border-white/10 rounded-3xl bg-white/5 flex flex-col items-center justify-center gap-4 group hover:border-gold/30 transition-all">
+                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center text-white/20 group-hover:text-gold transition-colors">
+                  <Upload size={24} />
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] font-black text-white uppercase tracking-widest">Documentación Previa (CSF, Semanas, INE)</p>
+                  <p className="text-[9px] text-white/20 font-black uppercase tracking-widest mt-1">Los archivos se subirán a la carpeta de Drive del cliente</p>
+                </div>
+              </div>
+
+              <div className="mt-10 flex gap-4">
+                <button 
+                  onClick={() => setShowMigrationModal(false)}
+                  className="flex-1 py-5 bg-white/5 text-white/40 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-white/10 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={handleSaveMigration}
+                  disabled={isSavingMigration}
+                  className="flex-[2] py-5 bg-gold text-black rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-2xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                >
+                  {isSavingMigration ? <Loader2 className="animate-spin" size={18} /> : "Crear Expediente & Carpeta"} <ShieldPlus size={18} />
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {showWAModal && (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
