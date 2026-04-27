@@ -237,6 +237,7 @@ export default function EntrevistaHub() {
       await callGAS('CREATE_HOJA', { 
         ...data, 
         id_hoja: sessionHojaId,
+        universo: hojaServicio.universo,
         servicios: hojaServicio.servicios.map(s => s.nombre),
         monto: hojaServicio.honorariosAcordados,
         dictamen: hojaServicio.notasDiagnostico,
@@ -583,6 +584,7 @@ export default function EntrevistaHub() {
         asesor: asesorNombre,
         firmaAsesor,
         dictamen: hojaServicio.notasDiagnostico,
+        universo: hojaServicio.universo,
         servicios: serviciosFinales.join(', '),
         monto: hojaServicio.honorariosAcordados,
         auditLog: JSON.stringify(auditLog),
@@ -814,7 +816,8 @@ export default function EntrevistaHub() {
                                                             ? [...hojaServicio.servicios, { nombre: srv, universo: 'U1' as const, precio: 0 }]
                                                             : hojaServicio.servicios.filter(s => s.nombre !== srv);
                                                         const total = updated.reduce((sum, s) => sum + s.precio, 0);
-                                                        setHojaServicio(prev => ({...prev, servicios: updated, honorariosAcordados: total}));
+                                                        const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
+                                                        setHojaServicio(prev => ({...prev, servicios: updated, honorariosAcordados: total, universo: globalU}));
                                                     }} className="hidden"/>
                                                     <span className={cn("text-xs font-bold", isSelected && "text-[#003366]")}>{srv}</span>
                                                 </div>
@@ -829,10 +832,12 @@ export default function EntrevistaHub() {
                                                       className="p-2 bg-white border border-slate-200 rounded-lg text-[10px] font-black uppercase text-slate-600 outline-none focus:border-[#003366] shadow-sm"
                                                       value={selectedService.universo}
                                                       onChange={(e) => {
+                                                          const val = e.target.value as 'U1' | 'U2';
                                                           const updated = [...hojaServicio.servicios];
                                                           const idx = updated.findIndex(s => s.nombre === srv);
-                                                          if(idx>=0) updated[idx].universo = e.target.value as 'U1' | 'U2';
-                                                          setHojaServicio({...hojaServicio, servicios: updated});
+                                                          if(idx>=0) updated[idx].universo = val;
+                                                          const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
+                                                          setHojaServicio({...hojaServicio, servicios: updated, universo: globalU});
                                                       }}
                                                     >
                                                       <option value="U1">U1 (única vez)</option>
@@ -866,7 +871,11 @@ export default function EntrevistaHub() {
                                       <label className="text-[9px] font-black uppercase text-slate-400 px-2">Otros Servicios</label>
                                       <button 
                                         type="button" 
-                                        onClick={() => setHojaServicio({...hojaServicio, servicios: [...hojaServicio.servicios, { nombre: 'Otro', universo: 'U1', precio: 0 }]})}
+                                        onClick={() => {
+                                          const updated = [...hojaServicio.servicios, { nombre: 'Otro', universo: 'U1' as const, precio: 0 }];
+                                          const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
+                                          setHojaServicio({...hojaServicio, servicios: updated, universo: globalU});
+                                        }}
                                         className="bg-[#DAA520] text-[#003366] px-3 py-1 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 hover:bg-[#c9961d] transition-all"
                                       >
                                         <PlusCircle size={10}/> AGREGAR OTRO
@@ -893,9 +902,11 @@ export default function EntrevistaHub() {
                                               className="p-2 bg-white border border-slate-200 rounded-lg text-[10px] font-black uppercase text-slate-600 outline-none focus:border-[#003366] shadow-sm w-30"
                                               value={srv.universo}
                                               onChange={(e) => {
+                                                  const val = e.target.value as 'U1' | 'U2';
                                                   const updated = [...hojaServicio.servicios];
-                                                  updated[idx].universo = e.target.value as 'U1' | 'U2';
-                                                  setHojaServicio({...hojaServicio, servicios: updated});
+                                                  updated[idx].universo = val;
+                                                  const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
+                                                  setHojaServicio({...hojaServicio, servicios: updated, universo: globalU});
                                               }}
                                             >
                                                 <option value="U1">U1 (única vez)</option>
@@ -919,7 +930,8 @@ export default function EntrevistaHub() {
                                               onClick={() => {
                                                   const updated = hojaServicio.servicios.filter((_, i) => i !== idx);
                                                   const total = updated.reduce((sum, s) => sum + s.precio, 0);
-                                                  setHojaServicio({...hojaServicio, servicios: updated, honorariosAcordados: total});
+                                                  const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
+                                                  setHojaServicio({...hojaServicio, servicios: updated, honorariosAcordados: total, universo: globalU});
                                               }}
                                               className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-colors"
                                             >
