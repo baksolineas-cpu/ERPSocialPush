@@ -123,7 +123,7 @@ export interface Cliente {
   contactosExtra?: { etiqueta: string, valor: string }[];
   notasExtra?: string;
   promotor?: string;
-  comisionActiva?: 'ACTIVA' | 'INACTIVA';
+  comisionActiva?: 'ACTIVA' | 'INACTIVA' | '';
 }
 
 export interface HojaServicio {

@@ -102,6 +102,7 @@ export default function EntrevistaHub() {
   const [curpSearch, setCurpSearch] = useState('');
   const [nameSearch, setNameSearch] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const [searchPerformed, setSearchPerformed] = useState(false);
   const [foundClients, setFoundClients] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -135,7 +136,7 @@ export default function EntrevistaHub() {
     nssList: [],
     contactosExtra: [],
     promotor: '',
-    comisionActiva: 'INACTIVA',
+    comisionActiva: '',
     ultimoSalario: 0,
     regimenFiscal: '',
     nivelCerteza: 'Bajo',
@@ -602,9 +603,17 @@ export default function EntrevistaHub() {
       addToast("El diagnóstico técnico no puede estar vacío.", 'error');
       return;
     }
-    await handleAutoSave();
-    updateData({ estatusfirma: 'PENDIENTE' });
-    setActiveStep(4);
+    
+    setIsPreviewing(true);
+    try {
+      await handleAutoSave();
+      updateData({ estatusfirma: 'PENDIENTE' });
+      setActiveStep(4);
+    } catch (e) {
+      addToast("Error al procesar previsualización.", "error");
+    } finally {
+      setIsPreviewing(false);
+    }
   };
 
   const handleSellarExpediente = async () => {
@@ -1025,7 +1034,11 @@ export default function EntrevistaHub() {
                 </div>
                 <div className="flex gap-4">
                   <button onClick={() => { handleAutoSave(); setActiveStep(2); }} className="px-8 py-5 bg-slate-200 text-slate-600 rounded-[24px] font-black uppercase shadow-xl hover:bg-slate-300 transition-all">Regresar</button>
-                  <button onClick={handleSiguientePasoDictamen} className="flex-1 py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl flex items-center justify-center gap-3">Previsualizar y Sellar Diagnóstico <ArrowRight /></button>
+                  <button onClick={handleSiguientePasoDictamen} disabled={isPreviewing} className="flex-1 py-5 bg-[#DAA520] text-[#003366] rounded-[24px] font-black uppercase shadow-xl flex items-center justify-center gap-3">
+                    {isPreviewing ? <Loader2 size={20} className="animate-spin" /> : null}
+                    {isPreviewing ? 'Generando vista previa...' : 'Previsualizar y Sellar Diagnóstico'}
+                    {!isPreviewing && <ArrowRight />}
+                  </button>
                 </div>
             </div>
         )}
@@ -1345,7 +1358,7 @@ export default function EntrevistaHub() {
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Estatus de Comisión</label>
                     <select 
-                      value={data.comisionActiva} 
+                      value={data.comisionActiva || "ACTIVA"} 
                       onChange={(e) => {
                         updateData({ comisionActiva: e.target.value as any });
                         registrarAccion(`Estatus de comisión cambiado a: ${e.target.value}`);

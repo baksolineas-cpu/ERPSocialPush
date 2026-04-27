@@ -597,8 +597,17 @@ function handleCreateCliente(payload) {
     mapUpdate(9, payload.comprobantedomiciliourl);             // J: ComprobanteDomicilioUrl
     mapUpdate(10, payload.domicilioExtraido);                  // K: DomicilioExtraido
     mapUpdate(24, payload.patrones);                           // Y: Patrones
-    mapUpdate(25, payload.promotor);                           // Z: Promotor
-    mapUpdate(26, payload.comisionActiva);                     // AA: ComisionActiva
+    mapUpdate(25, payload.promotor || "");                     // Z: Promotor
+    
+    // Lógica Inteligente de Estatus de Comisión
+    let estatusComision = payload.comisionActiva;
+    if (!estatusComision && payload.promotor && payload.promotor.trim() !== "") {
+      estatusComision = "ACTIVA"; // Si hay promotor pero no tocaron el select, por defecto es ACTIVA
+    } else if (!estatusComision) {
+      estatusComision = "INACTIVA"; // Si no hay promotor ni estatus, es INACTIVA
+    }
+    
+    mapUpdate(26, estatusComision);                            // AA: ComisionActiva
     
     // Carpeta Drive (Inteligencia de Carpetas)
     let folderId = rowData[11] || payload.id_carpeta_drive;
