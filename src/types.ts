@@ -122,6 +122,8 @@ export interface Cliente {
   remoteSyncSuccess?: boolean;
   contactosExtra?: { etiqueta: string, valor: string }[];
   notasExtra?: string;
+  promotor?: string;
+  comisionActiva?: 'ACTIVA' | 'INACTIVA';
 }
 
 export interface HojaServicio {

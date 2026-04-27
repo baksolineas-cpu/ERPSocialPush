@@ -89,30 +89,31 @@ function handleUpdateSignature(payload) {
 
   if (rowIndex === -1) return createResponse({ success: false, error: "Cliente no encontrado" }, 404);
 
-  // 1. Guardar archivos físicos en Drive
-  const rowObj = getSheetData("CLIENTES")[rowIndex - 1];
-  const folderId = rowObj.id_carpeta_drive || rowObj.idcarpetadrive || rowObj.idCarpetaDrive;
-  
-  if (folderId) {
-    try {
-      const folder = DriveApp.getFolderById(folderId);
-      if (payload.selfieBase64 && payload.selfieBase64.length > 50) {
-        const selfieBlob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg", `SELFIE_${searchId}.jpg`);
-        const selfieFile = folder.createFile(selfieBlob);
-        const selfieUrl = selfieFile.getUrl();
-        selfieFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-        // Buscar columna SelfieURL (Columna I)
-        const selfieColIndex = headers.indexOf("selfieurl");
-        if (selfieColIndex !== -1) {
-          sheet.getRange(rowIndex + 1, selfieColIndex + 1).setValue(selfieUrl);
+    // 1. Guardar archivos físicos en Drive
+    const rowObj = getSheetData("CLIENTES")[rowIndex - 1];
+    const folderId = rowObj.id_carpeta_drive || rowObj.idcarpetadrive || rowObj.idCarpetaDrive;
+    
+    if (folderId) {
+      try {
+        const folder = DriveApp.getFolderById(folderId);
+        if (payload.selfieBase64 && payload.selfieBase64.length > 50) {
+          const selfieBlob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg", `SELFIE_${searchId}.jpg`);
+          const selfieFile = folder.createFile(selfieBlob);
+          const selfieUrl = selfieFile.getUrl();
+          selfieFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+          
+          // Buscar columna SelfieURL (Columna I)
+          const selfieColIndex = headers.indexOf("selfieurl");
+          if (selfieColIndex !== -1) {
+            sheet.getRange(rowIndex + 1, selfieColIndex + 1).setValue(selfieUrl);
+          }
         }
-      }
-      if (payload.firmaBase64 && payload.firmaBase64.length > 50) {
-        const firmaBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png", `FIRMA_CLIENTE_${searchId}.png`);
-        folder.createFile(firmaBlob);
-      }
-    } catch(e) { logDebug("SIG_SAVE_ERR", e.toString()); }
-  }
+        if (payload.firmaBase64 && payload.firmaBase64.length > 50) {
+          const firmaBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png", `FIRMA_CLIENTE_${searchId}.png`);
+          folder.createFile(firmaBlob);
+        }
+      } catch(e) { logDebug("SIG_SAVE_ERR", e.toString()); }
+    }
 
   // 2. Actualizar estatus en Excel
   sheet.getRange(rowIndex + 1, estatusCol + 1).setValue("FIRMADO");
@@ -563,10 +564,10 @@ function handleCreateCliente(payload) {
     let rowData = [];
     if (existingRowIndex > -1) {
       rowData = [...values[existingRowIndex]];
-      while (rowData.length < 25) rowData.push(""); // A-Y
+      while (rowData.length < 27) rowData.push(""); // A-AA
     } else {
-      // Fila por defecto con 25 columnas (A-Y)
-      rowData = new Array(25).fill("");
+      // Fila por defecto con 27 columnas (A-AA)
+      rowData = new Array(27).fill("");
     }
 
     // 3. ACTUALIZACIÓN SELECTIVA (Solo si el payload trae el dato)
@@ -594,6 +595,8 @@ function handleCreateCliente(payload) {
     mapUpdate(9, payload.comprobantedomiciliourl);             // J: ComprobanteDomicilioUrl
     mapUpdate(10, payload.domicilioExtraido);                  // K: DomicilioExtraido
     mapUpdate(24, payload.patrones);                           // Y: Patrones
+    mapUpdate(25, payload.promotor);                           // Z: Promotor
+    mapUpdate(26, payload.comisionActiva);                     // AA: ComisionActiva
     
     // Carpeta Drive (Inteligencia de Carpetas)
     let folderId = rowData[11] || payload.id_carpeta_drive;

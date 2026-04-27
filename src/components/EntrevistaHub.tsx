@@ -97,6 +97,8 @@ export default function EntrevistaHub() {
     expedienteExistingFiles: {},
     nssList: [],
     contactosExtra: [],
+    promotor: '',
+    comisionActiva: 'INACTIVA',
     ultimoSalario: 0,
     regimenFiscal: '',
     nivelCerteza: 'Bajo',
@@ -537,8 +539,14 @@ export default function EntrevistaHub() {
     try {
       const edad = calculateDetailedAge(data.curp || '');
       const edadTexto = edad ? `${edad.anios} años` : 'Desconocida';
-      const promptText = `Basado en estas intenciones y necesidades que el asesor detectó: ${iaContext}, y los datos técnicos del caso: Semanas IMSS=${data.semanasCotizadas}, Edad=${edadTexto}, Salario=${data.ultimoSalario}, redacta un diagnóstico inicial profesional dirigido al cliente.`;
-      const draft = await getConsultorChatResponse([{ role: 'user', parts: [{ text: promptText }] }], data);
+      const serviciosStr = hojaServicio.servicios.map(s => s.nombre).join(', ');
+      
+      const draft = await getConsultorChatResponse([], { 
+        ...data, 
+        edad: edadTexto,
+        serviciosStr,
+        iaContext
+      });
       setHojaServicio(prev => ({ ...prev, notasDiagnostico: draft }));
       addToast("Diagnóstico redactado", 'success');
     } catch (error: any) {
@@ -1274,6 +1282,37 @@ export default function EntrevistaHub() {
                 </button>
 
                 <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Régimen Fiscal" value={data.regimenFiscal} fieldKey="regimenFiscal" isLocked={lockedFields.has('regimenFiscal')} onUnlock={() => { const s = new Set(lockedFields); s.delete('regimenFiscal'); setLockedFields(s); }} onChange={(v:any)=>updateData({regimenFiscal:v})} />
+                
+                <div className="pt-4 border-t border-white/10 space-y-4">
+                  <div className="flex items-center gap-2 mb-1 px-1">
+                    <User size={14} className="text-[#DAA520]" />
+                    <h5 className="text-[10px] font-black uppercase text-white/60 tracking-widest">Origen del Cliente (Migración)</h5>
+                  </div>
+                  
+                  <AuditoriaInput 
+                    onBlur={handleAutoSave} 
+                    registrarAccion={registrarAccion} 
+                    label="Nombre del Promotor" 
+                    value={data.promotor} 
+                    onChange={(v:any)=>updateData({promotor:v})} 
+                  />
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Estatus de Comisión</label>
+                    <select 
+                      value={data.comisionActiva} 
+                      onChange={(e) => {
+                        updateData({ comisionActiva: e.target.value as any });
+                        registrarAccion(`Estatus de comisión cambiado a: ${e.target.value}`);
+                        handleAutoSave();
+                      }}
+                      className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-sm font-bold text-white transition-all outline-none focus:border-[#DAA520]/50"
+                    >
+                      <option value="ACTIVA" className="bg-[#003366]">ACTIVA (Pagar $100/mes)</option>
+                      <option value="INACTIVA" className="bg-[#003366]">INACTIVA (No pagar)</option>
+                    </select>
+                  </div>
+                </div>
             </div>
             
             {/* Control Flotante Inferior fijo dentro del aside */}
