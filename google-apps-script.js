@@ -275,16 +275,7 @@ function handleFinalizeAudit(payload) {
              body.replaceText("{{DOMICILIO}}", cliente.domicilioextraido || "");
 
              doc.saveAndClose();
-             Utilities.sleep(3000);
-             
-             try {
-               const pdfBlob = copy.getAs('application/pdf');
-               const pdfFile = folder.createFile(pdfBlob).setName(copy.getName() + ".pdf");
-               pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-               copy.setTrashed(true);
-             } catch (pdfErr) {
-               logDebug("ERR_PDF_CONTRATO", pdfErr.toString());
-             }
+
           } catch(errC) { logDebug("ERR_CLONE_CONTRATO", errC.toString()); }
         }
 
