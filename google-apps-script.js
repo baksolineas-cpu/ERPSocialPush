@@ -53,6 +53,8 @@ function doPost(e) {
       return handleUpdateSignature(payload);
     } else if (action === 'GET_CLIENTE_STATUS') {
       return handleGetClienteStatus(payload);
+    } else if (action === 'RECORD_PAYMENT') {
+      return handleRecordPayment(payload);
     } else {
       return createResponse({ error: 'Acción no válida: ' + action }, 400);
     }
@@ -1108,6 +1110,64 @@ function handleOnboardingSync(payload) {
   } catch(e) { logDebug("ONB_DOC_ERR", e.toString()); }
 
   return createResponse({ success: true, id: curp10, id_carpeta_drive: folderId });
+}
+
+function handleRecordPayment(payload) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheetU2 = ss.getSheetByName("GESTIONES_U2");
+  if (!sheetU2) return createResponse({ success: false, error: "Hoja GESTIONES_U2 no encontrada" }, 404);
+
+  const dataU2 = sheetU2.getDataRange().getValues();
+  const headersU2 = dataU2[0].map(h => h.toString().toLowerCase().trim());
+  const clienteIdCol = headersU2.indexOf("clienteid");
+  const mesCol = headersU2.indexOf("mes");
+  const estatusCol = headersU2.indexOf("estatus");
+  const recibidoCol = headersU2.indexOf("recibido");
+  const updatedAtCol = headersU2.indexOf("updatedat");
+
+  const searchId = (payload.clienteId || payload.id || "").toString().toUpperCase();
+  const currentMonth = new Date().toLocaleString('es-MX', {month: 'long', year: 'numeric'});
+
+  logDebug("RECORD_PAYMENT", "Registrando pago para: " + searchId + " en mes: " + currentMonth);
+
+  let rowIndexU2 = -1;
+  for (let i = 1; i < dataU2.length; i++) {
+    const rowId = dataU2[i][clienteIdCol] ? dataU2[i][clienteIdCol].toString().toUpperCase() : "";
+    const rowMes = dataU2[i][mesCol] ? dataU2[i][mesCol].toString().toLowerCase() : "";
+    if (rowId === searchId && (rowMes.includes(currentMonth.split(' ')[0].toLowerCase()) || rowMes === currentMonth.toLowerCase())) {
+      rowIndexU2 = i;
+      break;
+    }
+  }
+
+  if (rowIndexU2 > -1) {
+    if (recibidoCol !== -1) sheetU2.getRange(rowIndexU2 + 1, recibidoCol + 1).setValue(1);
+    if (estatusCol !== -1) sheetU2.getRange(rowIndexU2 + 1, estatusCol + 1).setValue("PAGADO");
+    if (updatedAtCol !== -1) sheetU2.getRange(rowIndexU2 + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+  } 
+
+  const sheetClientes = ss.getSheetByName("CLIENTES");
+  const dataClientes = sheetClientes.getDataRange().getValues();
+  const headersClientes = dataClientes[0].map(h => h.toString().toLowerCase().trim());
+  const idColClientes = headersClientes.indexOf("id");
+  const curpColClientes = headersClientes.indexOf("curp");
+  const auditoriaCol = headersClientes.indexOf("estadoauditoria");
+
+  let clienteRowIndex = -1;
+  for (let i = 1; i < dataClientes.length; i++) {
+    const rowId = dataClientes[i][idColClientes] ? dataClientes[i][idColClientes].toString().toUpperCase() : "";
+    const rowCurp = dataClientes[i][curpColClientes] ? dataClientes[i][curpColClientes].toString().toUpperCase() : "";
+    if (rowId === searchId || rowCurp === searchId) {
+      clienteRowIndex = i;
+      break;
+    }
+  }
+
+  if (clienteRowIndex > -1 && auditoriaCol > -1) {
+    sheetClientes.getRange(clienteRowIndex + 1, auditoriaCol + 1).setValue("SERVICIO_ACTIVO");
+  }
+
+  return createResponse({ success: true });
 }
 
 function forzarPermisosReales() {

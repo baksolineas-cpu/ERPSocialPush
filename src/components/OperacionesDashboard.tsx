@@ -21,7 +21,8 @@ import {
   ChevronDown,
   Calendar,
   ShieldPlus,
-  Loader2
+  Loader2,
+  DollarSign
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { callGAS } from '@/services/apiService';
@@ -55,6 +56,8 @@ export default function OperacionesDashboard() {
   const [isSavingMigration, setIsSavingMigration] = useState(false);
   const [migrationFiles, setMigrationFiles] = useState<{name: string, content: string}[]>([]);
   const migrationFileInputRef = useRef<HTMLInputElement>(null);
+  const paymentInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingPaymentFor, setUploadingPaymentFor] = useState<string | null>(null);
 
   // Conciliación
   const [csvData, setCsvData] = useState<any[]>([]);
@@ -126,6 +129,48 @@ export default function OperacionesDashboard() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) parseCSV(file);
+  };
+
+  const handlePaymentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0] && uploadingPaymentFor) {
+      const file = e.target.files[0];
+      const clientId = uploadingPaymentFor;
+      const currentMonth = new Date().toLocaleString('es-MX', { month: 'long' }).toUpperCase();
+      const fileName = `PAGO_${currentMonth}_${clientId}.${file.name.split('.').pop()}`;
+      
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const fileData = event.target?.result as string;
+        try {
+          const clientFilter = clients.find(c => c.id === clientId);
+          const folderId = clientFilter?.id_carpeta_drive || clientFilter?.idcarpetadrive;
+          
+          if (!folderId) {
+            alert("No se encontró carpeta de Drive para este cliente.");
+            return;
+          }
+
+          const uploadRes = await callGAS('UPLOAD_FILE', {
+            id_carpeta_drive: folderId,
+            fileName,
+            fileData
+          });
+          
+          if (uploadRes?.success) {
+            const recordRes = await callGAS('RECORD_PAYMENT', { clienteId: clientId });
+            if (recordRes?.success) {
+              fetchData();
+              alert("Pago registrado y expediente activado.");
+            }
+          }
+        } catch (err) {
+          console.error("Error uploading payment", err);
+        } finally {
+          setUploadingPaymentFor(null);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleMigrationFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -208,6 +253,15 @@ export default function OperacionesDashboard() {
     return 'SIN REGISTRO';
   };
 
+  const hasPaidThisMonth = (clientId: string) => {
+    const currentMonth = new Date().toLocaleString('es-MX', { month: 'long', year: 'numeric' }).toLowerCase();
+    return gestionesU2.some(g => 
+      g.ClienteID === clientId && 
+      (g.mes?.toLowerCase().includes(currentMonth.split(' ')[0]) || g.mes?.toLowerCase() === currentMonth) &&
+      (g.Recibido === 1 || g.Recibido === true)
+    );
+  };
+
   return (
     <div className="min-h-screen bg-[#0A0D14] text-white p-8">
       <header className="mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -218,7 +272,7 @@ export default function OperacionesDashboard() {
 
         <div className="flex gap-4 items-center">
           <button 
-            onClick={() => window.open('https://calendar.google.com/calendar/embed?height=600&wkst=1&bgcolor=%23ffffff&ctz=America%2FMexico_City&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=0&showCalendars=0&showTz=1&mode=WEEK', '_blank')}
+            onClick={() => window.open('https://calendar.app.google/xhQAeqCHTCsdgBei6', '_blank')}
             className="bg-white/5 text-white px-6 py-3 rounded-xl border border-white/10 font-bold text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2"
           >
             <Calendar size={16} /> Agendar Cita
@@ -285,6 +339,7 @@ export default function OperacionesDashboard() {
                       <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">ID / Cliente</th>
                       <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Universo</th>
                       <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Auditoría</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Pago</th>
                       <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Promotor</th>
                       <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em] text-right">Acciones</th>
                     </tr>
@@ -309,18 +364,38 @@ export default function OperacionesDashboard() {
                             <div className="flex items-center gap-2">
                               <div className={cn(
                                 "w-2 h-2 rounded-full",
-                                client.estadoauditoria === 'ENTREVISTA_CONCLUIDA' ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : "bg-amber-500"
+                                client.estadoauditoria === 'SERVICIO_ACTIVO' ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : 
+                                client.estadoauditoria === 'ENTREVISTA_CONCLUIDA' ? "bg-blue-500" : "bg-amber-500"
                               )} />
                               <span className="text-[9px] font-black uppercase tracking-widest text-white/60">
-                                {client.estadoauditoria || 'SIN_ESTADO'}
+                                {client.estadoauditoria === 'SERVICIO_ACTIVO' ? 'ACTIVO' : client.estadoauditoria || 'SIN_ESTADO'}
                               </span>
                             </div>
+                          </td>
+                          <td className="px-8 py-6">
+                             {hasPaidThisMonth(client.id || '') ? (
+                               <div className="w-6 h-6 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center">
+                                  <Check size={14} />
+                               </div>
+                             ) : (
+                               <span className="text-[10px] text-white/10 uppercase font-black">Pendiente</span>
+                             )}
                           </td>
                           <td className="px-8 py-6">
                             <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest italic">{client.promotor || 'DIRECTO'}</span>
                           </td>
                           <td className="px-8 py-6 text-right">
                             <div className="flex justify-end gap-3 opacity-40 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={() => {
+                                  setUploadingPaymentFor(client.id || null);
+                                  paymentInputRef.current?.click();
+                                }}
+                                className="p-2 hover:bg-white/10 rounded-xl text-emerald-400 transition-all hover:scale-110" 
+                                title="Subir Comprobante de Pago"
+                              >
+                                <DollarSign size={18} />
+                              </button>
                               {id_carpeta ? (
                                 <button 
                                   onClick={() => window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank')}
@@ -383,7 +458,7 @@ export default function OperacionesDashboard() {
                              </div>
                            </td>
                            <td className="px-8 py-6">
-                             <span className="text-[10px] font-black text-white/60 uppercase">{g.Mes || 'N/A'}</span>
+                             <span className="text-[10px] font-black text-white/60 uppercase">{g.mes || 'N/A'}</span>
                            </td>
                            <td className="px-8 py-6">
                              <div className={cn(
@@ -604,6 +679,7 @@ export default function OperacionesDashboard() {
                   <p className="text-[9px] text-white/20 font-black uppercase tracking-widest mt-1">Haz clic para adjuntar archivos</p>
                 </div>
                 <input type="file" multiple accept=".pdf,image/*" ref={migrationFileInputRef} onChange={handleMigrationFileUpload} className="hidden" />
+                <input type="file" accept=".pdf,image/*" ref={paymentInputRef} onChange={handlePaymentUpload} className="hidden" />
                 {migrationFiles.length > 0 && (
                   <div className="w-full mt-4 space-y-2">
                     {migrationFiles.map((f, i) => (

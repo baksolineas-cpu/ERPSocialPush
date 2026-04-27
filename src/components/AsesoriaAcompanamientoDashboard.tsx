@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { motion } from 'motion/react';
 import { 
   Users, 
@@ -8,11 +8,60 @@ import {
   Send,
   Video,
   CheckCircle2,
-  Clock
+  Clock,
+  DollarSign,
+  Upload
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { callGAS } from '@/services/apiService';
 
 export default function AsesoriaAcompanamientoDashboard() {
+  const paymentInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingPaymentFor, setUploadingPaymentFor] = useState<string | null>(null);
+
+  const handlePaymentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0] && uploadingPaymentFor) {
+      const file = e.target.files[0];
+      const clientId = uploadingPaymentFor;
+      const currentMonth = new Date().toLocaleString('es-MX', { month: 'long' }).toUpperCase();
+      const fileName = `PAGO_INICIAL_${currentMonth}_${clientId}.${file.name.split('.').pop()}`;
+      
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const fileData = event.target?.result as string;
+        try {
+          // Buscamos info del cliente (aquí asumiendo que el ID es el del lead para simplificar el flujo)
+          const res = await callGAS('GET_CLIENTE_STATUS', { clienteId: clientId });
+          const clientData = res?.data;
+          const folderId = clientData?.id_carpeta_drive || clientData?.idcarpetadrive;
+          
+          if (!folderId) {
+             alert("No se encontró carpeta de Drive. ¿Ya se creó el expediente?");
+             return;
+          }
+
+          const uploadRes = await callGAS('UPLOAD_FILE', {
+            id_carpeta_drive: folderId,
+            fileName,
+            fileData
+          });
+          
+          if (uploadRes?.success) {
+            const recordRes = await callGAS('RECORD_PAYMENT', { clienteId: clientId });
+            if (recordRes?.success) {
+              alert("Pago registrado y expediente activado exitosamente.");
+            }
+          }
+        } catch (err) {
+          console.error("Error uploading payment", err);
+        } finally {
+          setUploadingPaymentFor(null);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const kpis = [
     { label: 'Leads Recibidos vs. Contactados', value: '85%', subValue: '210/247', icon: TrendingUp, color: 'text-blue-400', bg: 'bg-blue-400/10' },
     { label: 'Contactados vs. Entrevistas', value: '42%', subValue: '88/210', icon: Target, color: 'text-gold', bg: 'bg-gold/10' },
@@ -33,7 +82,7 @@ export default function AsesoriaAcompanamientoDashboard() {
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mt-1">Gestión de Leads y Primer Contacto</p>
         </div>
         <button 
-          onClick={() => window.open('https://calendar.google.com/calendar/embed?height=600&wkst=1&bgcolor=%23ffffff&ctz=America%2FMexico_City&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=0&showCalendars=0&showTz=1&mode=WEEK', '_blank')}
+          onClick={() => window.open('https://calendar.app.google/xhQAeqCHTCsdgBei6', '_blank')}
           className="bg-gold text-black px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-[0_0_30px_rgba(218,165,32,0.3)] hover:scale-105 transition-all flex items-center gap-3"
         >
           <Calendar size={18} /> Agendar Cita de Valoración
@@ -114,9 +163,21 @@ export default function AsesoriaAcompanamientoDashboard() {
                         </span>
                       </td>
                       <td className="px-8 py-6 text-right">
-                        <button className="bg-white/5 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-gold hover:text-black transition-all shadow-xl">
-                          Gestionar
-                        </button>
+                        <div className="flex justify-end gap-2">
+                          <button 
+                            onClick={() => {
+                              setUploadingPaymentFor(lead.id);
+                              paymentInputRef.current?.click();
+                            }}
+                            className="p-2 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-xl transition-all"
+                            title="Subir Comprobante de Pago Inicial"
+                          >
+                            <DollarSign size={16} />
+                          </button>
+                          <button className="bg-white/5 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-gold hover:text-black transition-all shadow-xl">
+                            Gestionar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -124,6 +185,7 @@ export default function AsesoriaAcompanamientoDashboard() {
               </table>
             </div>
           </section>
+          <input type="file" accept=".pdf,image/*" ref={paymentInputRef} onChange={handlePaymentUpload} className="hidden" />
         </div>
 
         {/* Right Column: Sidebar / Calendar */}
