@@ -551,7 +551,7 @@ export default function OnboardingExpress() {
 
               <div className="w-full bg-slate-50 rounded-2xl overflow-hidden border border-slate-200 h-[600px]">
                 <iframe 
-                  src="https://calendar.google.com/calendar/appointments/schedules/AcZssZ03MVoigI4Wqv32j0orrVxdkPVhIHtXSwzEVblTavcK6ykcLXU2fksvV53BU307eatTWOLzGGCN?gv=true" 
+                  src="https://calendar.app.google/xhQAeqCHTCsdgBei6" 
                   className="w-full h-full border-0"
                   title="Google Calendar"
                 ></iframe>

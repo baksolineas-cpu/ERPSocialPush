@@ -32,7 +32,10 @@ export default function AsesoriaAcompanamientoDashboard() {
           <h1 className="text-4xl font-black italic tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-white to-gold">Asesoría & Acompañamiento</h1>
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mt-1">Gestión de Leads y Primer Contacto</p>
         </div>
-        <button className="bg-gold text-black px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-[0_0_30px_rgba(218,165,32,0.3)] hover:scale-105 transition-all flex items-center gap-3">
+        <button 
+          onClick={() => window.open('https://calendar.google.com/calendar/embed?height=600&wkst=1&bgcolor=%23ffffff&ctz=America%2FMexico_City&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=0&showCalendars=0&showTz=1&mode=WEEK', '_blank')}
+          className="bg-gold text-black px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-[0_0_30px_rgba(218,165,32,0.3)] hover:scale-105 transition-all flex items-center gap-3"
+        >
           <Calendar size={18} /> Agendar Cita de Valoración
         </button>
       </header>
@@ -137,7 +140,7 @@ export default function AsesoriaAcompanamientoDashboard() {
                     </div>
                  </div>
               </div>
-              <div className="flex-1 w-full bg-white relative">
+              <div className="flex-1 w-full bg-white relative rounded-3xl overflow-hidden">
                  <iframe 
                     src="https://calendar.google.com/calendar/embed?height=600&wkst=1&bgcolor=%23ffffff&ctz=America%2FMexico_City&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=0&showCalendars=0&showTz=1&mode=WEEK" 
                     style={{ border: 0 }} 
@@ -147,7 +150,6 @@ export default function AsesoriaAcompanamientoDashboard() {
                     scrolling="no"
                     className="grayscale brightness-90 contrast-125 invert-0 filter-none"
                  />
-                 <div className="absolute inset-0 pointer-events-none border-[12px] border-[#0A0D14]" />
               </div>
            </section>
         </div>

@@ -53,6 +53,8 @@ export default function OperacionesDashboard() {
     whatsapp: ''
   });
   const [isSavingMigration, setIsSavingMigration] = useState(false);
+  const [migrationFiles, setMigrationFiles] = useState<{name: string, content: string}[]>([]);
+  const migrationFileInputRef = useRef<HTMLInputElement>(null);
 
   // Conciliación
   const [csvData, setCsvData] = useState<any[]>([]);
@@ -126,6 +128,18 @@ export default function OperacionesDashboard() {
     if (file) parseCSV(file);
   };
 
+  const handleMigrationFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      Array.from(e.target.files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setMigrationFiles(prev => [...prev, { name: file.name, content: event.target?.result as string }]);
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+  };
+
   const parseCSV = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -158,11 +172,13 @@ export default function OperacionesDashboard() {
       const res = await callGAS('CREATE_CLIENTE', {
         ...migrationData,
         estadoauditoria: 'MIGRACION_PENDIENTE',
-        promotor: 'OPERACIONES_MIGRACION'
+        promotor: 'OPERACIONES_MIGRACION',
+        documentos: migrationFiles
       });
       if (res?.success) {
         setShowMigrationModal(false);
         setMigrationData({ nombre: '', apellidos: '', curp: '', whatsapp: '' });
+        setMigrationFiles([]);
         fetchData();
       }
     } catch (e) {
@@ -185,15 +201,10 @@ export default function OperacionesDashboard() {
   };
 
   const getClientUniverso = (clientId: string) => {
-    // Busca la hoja más reciente para este cliente
     const clientHojas = hojas
-      .filter(h => h.clienteId === clientId)
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    
-    if (clientHojas.length > 0) {
-      const h = clientHojas[0];
-      return h.universo || 'U1';
-    }
+      .filter((h: any) => h.clienteid === clientId || h.id_cliente === clientId)
+      .sort((a: any, b: any) => new Date(b.createdat || 0).getTime() - new Date(a.createdat || 0).getTime());
+    if (clientHojas.length > 0) return clientHojas[0].universo || 'U1';
     return 'SIN REGISTRO';
   };
 
@@ -204,20 +215,29 @@ export default function OperacionesDashboard() {
           <h1 className="text-4xl font-black italic tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-white to-gold">Dashboard Operativo</h1>
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mt-1">Centro de Mando, Gestión & Cobranza</p>
         </div>
-        
-        <div className="flex bg-white/5 p-1 rounded-2xl border border-white/10 shadow-2xl">
-          {(['clientes', 'pagos_u2', 'conciliacion', 'calendario'] as Tab[] | any[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={cn(
-                "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                activeTab === tab ? "bg-gold text-black shadow-[0_0_20px_rgba(218,165,32,0.3)]" : "text-white/40 hover:text-white"
-              )}
-            >
-              {tab.replace('_', ' ')}
-            </button>
-          ))}
+
+        <div className="flex gap-4 items-center">
+          <button 
+            onClick={() => window.open('https://calendar.google.com/calendar/embed?height=600&wkst=1&bgcolor=%23ffffff&ctz=America%2FMexico_City&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=0&showCalendars=0&showTz=1&mode=WEEK', '_blank')}
+            className="bg-white/5 text-white px-6 py-3 rounded-xl border border-white/10 font-bold text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2"
+          >
+            <Calendar size={16} /> Agendar Cita
+          </button>
+          
+          <div className="flex bg-white/5 p-1 rounded-2xl border border-white/10 shadow-2xl">
+            {(['clientes', 'pagos_u2', 'conciliacion', 'calendario'] as Tab[] | any[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  activeTab === tab ? "bg-gold text-black shadow-[0_0_20px_rgba(218,165,32,0.3)]" : "text-white/40 hover:text-white"
+                )}
+              >
+                {tab.replace('_', ' ')}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -491,7 +511,7 @@ export default function OperacionesDashboard() {
           </div>
         )}
         {activeTab === ('calendario' as any) && (
-           <div className="h-[700px] bg-white rounded-[40px] border border-white/10 overflow-hidden shadow-2xl relative animate-in fade-in slide-in-from-bottom-4 duration-500">
+           <div className="h-[700px] w-full bg-white rounded-3xl border border-white/10 overflow-hidden shadow-2xl relative animate-in fade-in slide-in-from-bottom-4 duration-500">
               <iframe 
                 src="https://calendar.google.com/calendar/embed?height=600&wkst=1&bgcolor=%23ffffff&ctz=America%2FMexico_City&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=0&showCalendars=0&showTz=1&mode=WEEK" 
                 style={{ border: 0 }} 
@@ -501,7 +521,6 @@ export default function OperacionesDashboard() {
                 scrolling="no"
                 className="grayscale brightness-90 contrast-125 invert-0 filter-none"
               />
-              <div className="absolute inset-0 pointer-events-none border-[20px] border-[#0A0D14]" />
            </div>
         )}
       </main>
@@ -576,14 +595,22 @@ export default function OperacionesDashboard() {
                 </div>
               </div>
 
-              <div className="mt-8 p-8 border-2 border-dashed border-white/10 rounded-3xl bg-white/5 flex flex-col items-center justify-center gap-4 group hover:border-gold/30 transition-all">
+              <div className="mt-8 p-8 border-2 border-dashed border-white/10 rounded-3xl bg-white/5 flex flex-col items-center justify-center gap-4 group hover:border-gold/30 transition-all cursor-pointer" onClick={() => migrationFileInputRef.current?.click()}>
                 <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center text-white/20 group-hover:text-gold transition-colors">
                   <Upload size={24} />
                 </div>
                 <div className="text-center">
-                  <p className="text-[10px] font-black text-white uppercase tracking-widest">Documentación Previa (CSF, Semanas, INE)</p>
-                  <p className="text-[9px] text-white/20 font-black uppercase tracking-widest mt-1">Los archivos se subirán a la carpeta de Drive del cliente</p>
+                  <p className="text-[10px] font-black text-white uppercase tracking-widest">Documentación Previa (PDF, JPG)</p>
+                  <p className="text-[9px] text-white/20 font-black uppercase tracking-widest mt-1">Haz clic para adjuntar archivos</p>
                 </div>
+                <input type="file" multiple accept=".pdf,image/*" ref={migrationFileInputRef} onChange={handleMigrationFileUpload} className="hidden" />
+                {migrationFiles.length > 0 && (
+                  <div className="w-full mt-4 space-y-2">
+                    {migrationFiles.map((f, i) => (
+                      <div key={i} className="text-[9px] font-bold text-emerald-400 bg-emerald-400/10 px-3 py-2 rounded-lg truncate">✓ {f.name}</div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="mt-10 flex gap-4">
