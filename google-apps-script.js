@@ -98,7 +98,14 @@ function handleUpdateSignature(payload) {
       const folder = DriveApp.getFolderById(folderId);
       if (payload.selfieBase64 && payload.selfieBase64.length > 50) {
         const selfieBlob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg", `SELFIE_${searchId}.jpg`);
-        folder.createFile(selfieBlob);
+        const selfieFile = folder.createFile(selfieBlob);
+        const selfieUrl = selfieFile.getUrl();
+        selfieFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        // Buscar columna SelfieURL (Columna I)
+        const selfieColIndex = headers.indexOf("selfieurl");
+        if (selfieColIndex !== -1) {
+          sheet.getRange(rowIndex + 1, selfieColIndex + 1).setValue(selfieUrl);
+        }
       }
       if (payload.firmaBase64 && payload.firmaBase64.length > 50) {
         const firmaBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png", `FIRMA_CLIENTE_${searchId}.png`);
@@ -964,7 +971,11 @@ function handleOnboardingSync(payload) {
   const folder = DriveApp.getFolderById(folderId);
   if (payload.selfieBase64 && payload.selfieBase64.length > 50) {
     const selfieBlob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg", `SELFIE_ONB_${curp10}.jpg`);
-    folder.createFile(selfieBlob);
+    const selfieFile = folder.createFile(selfieBlob);
+    const selfieUrl = selfieFile.getUrl();
+    selfieFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    // Columna I es la posición 8 (9na columna)
+    sheet.getRange(existingRowIndex > -1 ? existingRowIndex + 1 : sheet.getLastRow(), 9).setValue(selfieUrl);
   }
   if (payload.firmaBase64 && payload.firmaBase64.length > 50) {
     const firmaBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png", `FIRMA_ONB_${curp10}.png`);
