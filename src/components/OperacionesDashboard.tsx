@@ -364,11 +364,11 @@ export default function OperacionesDashboard() {
                             <div className="flex items-center gap-2">
                               <div className={cn(
                                 "w-2 h-2 rounded-full",
-                                client.estadoauditoria === 'SERVICIO_ACTIVO' ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : 
-                                client.estadoauditoria === 'ENTREVISTA_CONCLUIDA' ? "bg-blue-500" : "bg-amber-500"
+                                (client['estadoauditoría'] || client.estadoauditoria) === 'SERVICIO_ACTIVO' ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : 
+                                (client['estadoauditoría'] || client.estadoauditoria) === 'ENTREVISTA_CONCLUIDA' ? "bg-blue-500" : "bg-amber-500"
                               )} />
                               <span className="text-[9px] font-black uppercase tracking-widest text-white/60">
-                                {client.estadoauditoria === 'SERVICIO_ACTIVO' ? 'ACTIVO' : client.estadoauditoria || 'SIN_ESTADO'}
+                                {client['estadoauditoría'] || client.estadoauditoria === 'SERVICIO_ACTIVO' ? 'ACTIVO' : (client['estadoauditoría'] || client.estadoauditoria) || 'SIN_ESTADO'}
                               </span>
                             </div>
                           </td>
@@ -406,17 +406,9 @@ export default function OperacionesDashboard() {
                                 </button>
                               ) : <span className="p-2 text-white/10"><FolderOpen size={18} /></span>}
                               
-                              {client.contrato_url ? (
+                              {id_carpeta ? (
                                 <button 
-                                  onClick={() => {
-                                    // Intenta buscar el diagnóstico en los metadatos o abre carpeta como fallback
-                                    const driveId = client.id_carpeta_drive || client.idcarpetadrive;
-                                    if (client.link_diagnostico) {
-                                      window.open(client.link_diagnostico, '_blank');
-                                    } else if (driveId) {
-                                      window.open(`https://drive.google.com/drive/folders/${driveId}`, '_blank');
-                                    }
-                                  }}
+                                  onClick={() => window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank')}
                                   className="p-2 hover:bg-white/10 rounded-xl text-gold transition-all hover:scale-110" 
                                   title="Ver Diagnóstico / Contrato"
                                 >

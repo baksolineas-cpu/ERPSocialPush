@@ -20,6 +20,7 @@ import { Cliente } from '@/types';
 
 export default function AsesoriaAcompanamientoDashboard() {
   const [clients, setClients] = useState<Cliente[]>([]);
+  const [hojas, setHojas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -33,13 +34,26 @@ export default function AsesoriaAcompanamientoDashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await callGAS('GET_DATA', { sheetName: 'CLIENTES' });
-      if (res?.success) setClients(res.data);
+      const [clientsRes, hojasRes] = await Promise.all([
+        callGAS('GET_DATA', { sheetName: 'CLIENTES' }),
+        callGAS('GET_DATA', { sheetName: 'HOJA_SERVICIO' })
+      ]);
+      if (clientsRes?.success) setClients(clientsRes.data);
+      if (hojasRes?.success) setHojas(hojasRes.data);
     } catch (err) {
       console.error("Error fetching advisory data", err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const getClientUniverso = (clientId: string) => {
+    const clientHojas = hojas
+      .filter((h: any) => h.clienteid === clientId || h.id_cliente === clientId)
+      .sort((a: any, b: any) => new Date(b.createdat || 0).getTime() - new Date(a.createdat || 0).getTime());
+    
+    const universo = clientHojas.length > 0 ? (clientHojas[0].universo || 'U1') : 'U1';
+    return universo === 'U2' ? 'Servicios Integrales' : 'Servicios Individuales';
   };
 
   const handlePaymentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -99,7 +113,7 @@ export default function AsesoriaAcompanamientoDashboard() {
     <div className="min-h-screen bg-[#0A0D14] text-white p-8">
       <header className="mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <h1 className="text-4xl font-black italic tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-white to-gold py-2">Asesoría & Acompañamiento Estratégico</h1>
+          <h1 className="text-4xl font-black italic tracking-tighter uppercase text-gold py-2">Asesoría & Acompañamiento Estratégico</h1>
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mt-1">Centro de Activación y Seguimiento de Consultoría</p>
         </div>
         <div className="flex gap-4">
@@ -153,11 +167,11 @@ export default function AsesoriaAcompanamientoDashboard() {
                   {loading ? (
                     <tr><td colSpan={4} className="py-20 text-center text-white/20 animate-pulse font-black uppercase text-xs tracking-widest">Sincronizando expedientes...</td></tr>
                   ) : filteredClients.length > 0 ? (
-                    filteredClients.map((client, i) => {
-                      const id_carpeta = client.id_carpeta_drive || client.idcarpetadrive;
-                      const hasSigned = client.firmadigital === 'FIRMADO' || client.estadoauditoria === 'SERVICIO_ACTIVO';
-                      
-                      return (
+                      filteredClients.map((client, i) => {
+                        const id_carpeta = client.id_carpeta_drive || client.idcarpetadrive;
+                        const hasSigned = client.estatusfirma === 'FIRMADO' || (client['estadoauditoría'] || client.estadoauditoria) === 'SERVICIO_ACTIVO';
+                        
+                        return (
                         <tr key={i} className="hover:bg-white/10 transition-colors">
                           <td className="px-8 py-6">
                             <div className="flex flex-col">
@@ -167,7 +181,7 @@ export default function AsesoriaAcompanamientoDashboard() {
                           </td>
                           <td className="px-8 py-6">
                             <span className="text-[10px] font-black px-3 py-1 bg-white/5 text-white/60 rounded-lg border border-white/10 uppercase tracking-widest">
-                              {getUniversoLabel(client.estadoauditoria)}
+                              {getClientUniverso(client.id || '')}
                             </span>
                           </td>
                           <td className="px-8 py-6">
@@ -175,12 +189,16 @@ export default function AsesoriaAcompanamientoDashboard() {
                               {hasSigned ? (
                                 <>
                                   <CheckCircle2 size={14} className="text-emerald-400" />
-                                  <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest font-mono">Contrato Firmado</span>
+                                  <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest font-mono">
+                                    {client.estatusfirma || 'Contrato Firmado'}
+                                  </span>
                                 </>
                               ) : (
                                 <>
                                   <Clock size={14} className="text-amber-400" />
-                                  <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest font-mono">Pendiente de Firma</span>
+                                  <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest font-mono">
+                                    {client.estatusfirma || 'Pendiente de Firma'}
+                                  </span>
                                 </>
                               )}
                             </div>
@@ -201,13 +219,22 @@ export default function AsesoriaAcompanamientoDashboard() {
                               )}
                               
                               {id_carpeta && (
-                                <button 
-                                  onClick={() => window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank')}
-                                  className="p-2.5 bg-blue-500/10 text-blue-400 hover:bg-blue-400 hover:text-black rounded-xl transition-all"
-                                  title="Abrir Expediente Drive"
-                                >
-                                  <FolderOpen size={18} />
-                                </button>
+                                <>
+                                  <button 
+                                    onClick={() => window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank')}
+                                    className="p-2.5 bg-blue-500/10 text-blue-400 hover:bg-blue-400 hover:text-black rounded-xl transition-all"
+                                    title="Abrir Expediente Drive"
+                                  >
+                                    <FolderOpen size={18} />
+                                  </button>
+                                  <button 
+                                    onClick={() => window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank')}
+                                    className="p-2.5 bg-gold/10 text-gold hover:bg-gold hover:text-black rounded-xl transition-all"
+                                    title="Ver Diagnóstico"
+                                  >
+                                    <FileText size={18} />
+                                  </button>
+                                </>
                               )}
                             </div>
                           </td>
