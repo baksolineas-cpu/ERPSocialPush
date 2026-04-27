@@ -673,7 +673,7 @@ function handleCreateCliente(payload) {
     mapUpdate(13, payload.regimenFiscal);                      // N: Régimen Fiscal
     mapUpdate(14, payload.semanasCotizadas);                   // O: Semanas Cotizadas
     mapUpdate(15, payload.ultimoSalario);                      // P: Último Salario
-    mapUpdate(16, payload.estadoAuditoria || "PENDIENTE_ENTREVISTA"); // Q: Estado Auditoría
+    mapUpdate(16, payload.estadoAuditoria || rowData[16] || "PENDIENTE_ENTREVISTA"); // Q: Estado Auditoría
     mapUpdate(17, payload.notasSeguimiento);                   // R: Notas Seguimiento
     mapUpdate(18, payload.nivelCerteza);                      // S: Nivel Certeza
     mapUpdate(19, payload.desgloseSemanas);                     // T: Desglose de Semanas

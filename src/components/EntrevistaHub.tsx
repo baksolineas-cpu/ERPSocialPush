@@ -651,7 +651,8 @@ export default function EntrevistaHub() {
         tipoDocEval,
         notasExtra: hojaServicio.otroServicioTexto,
         serviciosU2,
-        montoU2
+        montoU2,
+        estadoAuditoria: 'ENTREVISTA_CONCLUIDA'
       });
 
       if (res?.success) {
