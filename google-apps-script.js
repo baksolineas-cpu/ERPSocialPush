@@ -685,10 +685,17 @@ function handleCreateHoja(payload) {
     
     const data = sheet.getDataRange().getValues();
     const headers = data[0].map(h => h.toString().toLowerCase().trim());
-    const idHojaCol = headers.indexOf("id_hoja");
-    const idClienteCol = headers.indexOf("id_cliente");
     
-    // Búsqueda de registro existente (Upsert) por ID_Hoja (Columna A/0)
+    // Fix: Soportar tanto 'id_hoja' como 'id' en el encabezado (Fallback a Columna A)
+    let idHojaCol = headers.indexOf("id_hoja");
+    if (idHojaCol === -1) idHojaCol = headers.indexOf("id");
+    if (idHojaCol === -1) idHojaCol = 0; 
+    
+    // Soportar variantes del ID de cliente
+    let idClienteCol = headers.indexOf("id_cliente");
+    if (idClienteCol === -1) idClienteCol = headers.indexOf("clienteid");
+    
+    // Búsqueda de registro existente (Upsert) por ID_Hoja
     let rowIndex = -1;
     const searchHojaId = (payload.id_hoja || "").toString().toUpperCase().trim();
     if (searchHojaId) {
