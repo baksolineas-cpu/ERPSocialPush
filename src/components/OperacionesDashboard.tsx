@@ -444,7 +444,7 @@ export default function OperacionesDashboard() {
                                 (client['estadoauditoría'] || client.estadoauditoria) === 'ENTREVISTA_CONCLUIDA' ? "bg-blue-500" : "bg-amber-500"
                               )} />
                               <span className="text-[9px] font-black uppercase tracking-widest text-white/60">
-                                {client['estadoauditoría'] || client.estadoauditoria === 'SERVICIO_ACTIVO' ? 'ACTIVO' : (client['estadoauditoría'] || client.estadoauditoria) || 'SIN_ESTADO'}
+                                {(client['estadoauditoría'] || client.estadoauditoria) === 'SERVICIO_ACTIVO' ? 'ACTIVO' : (client['estadoauditoría'] || client.estadoauditoria) || 'SIN_ESTADO'}
                               </span>
                             </div>
                           </td>
@@ -614,13 +614,11 @@ export default function OperacionesDashboard() {
                            total += parseFloat(h.pago_promotor as any || 0);
                          }
                        });
-                       // Just an arbitrary commission addition to give it data based on logic logic
                        let u2Comimsion = 0;
                        gestionesU2.forEach(g => {
-                           // Assume U2 generates 100 mxn for promotor based on older logic
                            const c = clients.find(cl => cl.id === g.ClienteID);
                            if (c && c.promotor === p) {
-                               u2Comimsion += 100;
+                               u2Comimsion += parseFloat(g.pago_promotor || g.Pago_Promotor || 0);
                            }
                        });
                        total += u2Comimsion;
