@@ -354,7 +354,7 @@ function handleFinalizeAudit(payload) {
   // Paso 2 & 4: Contrato Marco -> PDF
   try {
     if (CONTRATO_TEMPLATE_ID && !CONTRATO_TEMPLATE_ID.includes("placeholder")) {
-      const copy = DriveApp.getFileById(CONTRATO_TEMPLATE_ID).makeCopy("TEMP_CONTRATO_" + curp10, folder);
+      const copy = DriveApp.getFileById(CONTRATO_TEMPLATE_ID).makeCopy("CONTRATO_MARCO_" + curp10, folder);
       const doc = DocumentApp.openById(copy.getId());
       const body = doc.getBody();
       
@@ -440,7 +440,7 @@ function generateDiagnosticDoc(clientData, servicesData, montoTotal, asesorName,
     
     // Crear Documento Temporal con VERSIONAMIENTO
     const suffix = idHoja || new Date().getTime();
-    const doc = DocumentApp.create("DIAGNOSTICO_CERTIFICADO_" + clientData.curp + "_" + suffix);
+    const doc = DocumentApp.create("DIAGNOSTICO_CERTIFICADO_" + searchId);
     const docFile = DriveApp.getFileById(doc.getId());
     docFile.moveTo(folder); // Moverlo a la carpeta del cliente
     
@@ -859,7 +859,27 @@ function handleCreateHoja(payload) {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const searchHojaId = (payload.id_hoja || Utilities.getUuid()).toString().toUpperCase().trim();
     const idBruto = (payload.clienteId || payload.id || "").toString().toUpperCase().replace("NEW_", "").trim();
-    const searchClienteId = idBruto.substring(0, 10).toUpperCase();
+    let searchClienteId = idBruto.substring(0, 10).toUpperCase();
+
+    // Resolver ID canónico antes de buscar duplicados
+    try {
+      const clientesSheet = ss.getSheetByName("CLIENTES");
+      if (clientesSheet) {
+        const cVals = clientesSheet.getDataRange().getValues();
+        const cHdrs = cVals[0].map(h => h.toString().toLowerCase().trim());
+        const cIdCol = cHdrs.indexOf("id");
+        const cCurpCol = cHdrs.indexOf("curp");
+        for (let ci = 1; ci < cVals.length; ci++) {
+          const cId = cVals[ci][cIdCol] ? cVals[ci][cIdCol].toString().toUpperCase().trim() : "";
+          const cCurp = cVals[ci][cCurpCol] ? cVals[ci][cCurpCol].toString().toUpperCase().trim() : "";
+          if (cId === searchClienteId || cId.includes(searchClienteId) || 
+              cCurp.startsWith(searchClienteId) || searchClienteId.startsWith(cId.substring(0,10))) {
+            if (cId && cId.length >= 10) { searchClienteId = cId.substring(0, 10); }
+            break;
+          }
+        }
+      }
+    } catch(e) {}
     let isMigracion = (payload.origen && (payload.origen.toLowerCase().includes('socio') || payload.origen.toLowerCase().includes('migra'))) || payload.esMigracion || payload.isMigracion;
     let tienePromotor = (payload.promotor && payload.promotor.trim() !== '') ? true : false;
     let folderId = payload.id_carpeta_drive;
@@ -1513,7 +1533,7 @@ function handleRpaUpload(payload) {
 
 function handlePayCommission(payload) {
   const lock = LockService.getScriptLock();
-  try { lock.waitLock(10000); } catch(e) {}
+  try { lock.waitLock(10000); } catch(e) { return createResponse({ success: false, error: 'Sistema ocupado, reintenta en unos segundos.' }, 429); }
   
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
