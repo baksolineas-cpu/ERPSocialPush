@@ -164,7 +164,7 @@ export default function HojasDeServicio() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-wrap gap-1">
-                      {hoja.servicios.map((s, i) => (
+                      {(Array.isArray(hoja.servicios) ? hoja.servicios : (typeof hoja.servicios === 'string' ? (hoja.servicios as string).split(',') : [])).map((s: any, i: number) => (
                         <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">
                           {s}
                         </span>

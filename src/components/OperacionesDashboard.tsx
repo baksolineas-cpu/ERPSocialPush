@@ -247,10 +247,21 @@ export default function OperacionesDashboard() {
 
   const getClientUniverso = (clientId: string) => {
     const clientHojas = hojas
-      .filter((h: any) => h.clienteid === clientId || h.id_cliente === clientId)
-      .sort((a: any, b: any) => new Date(b.createdat || 0).getTime() - new Date(a.createdat || 0).getTime());
+      .filter((h: any) => h.clienteid === clientId || h.id_cliente === clientId || h.idcliente === clientId)
+      .sort((a: any, b: any) => new Date(b.createdat || b.fecha || 0).getTime() - new Date(a.createdat || a.fecha || 0).getTime());
     if (clientHojas.length > 0) return clientHojas[0].universo || 'U1';
     return 'SIN REGISTRO';
+  };
+
+  const getClientDiagnosticUrl = (clientId: string) => {
+    const clientHojas = hojas
+      .filter((h: any) => h.clienteid === clientId || h.id_cliente === clientId || h.idcliente === clientId)
+      .sort((a: any, b: any) => new Date(b.createdat || b.fecha || 0).getTime() - new Date(a.createdat || a.fecha || 0).getTime());
+    
+    if (clientHojas.length > 0) {
+      return clientHojas[0].url_diagnostico || clientHojas[0].urldiagnostico;
+    }
+    return null;
   };
 
   const hasPaidThisMonth = (clientId: string) => {
@@ -266,7 +277,7 @@ export default function OperacionesDashboard() {
     <div className="min-h-screen bg-[#0A0D14] text-white p-8">
       <header className="mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <h1 className="text-4xl font-black italic tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-white to-gold">Dashboard Operativo</h1>
+          <h1 className="text-4xl font-black italic tracking-tighter uppercase text-white pt-2">Dashboard Operativo</h1>
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mt-1">Centro de Mando, Gestión & Cobranza</p>
         </div>
 
@@ -408,9 +419,16 @@ export default function OperacionesDashboard() {
                               
                               {id_carpeta ? (
                                 <button 
-                                  onClick={() => window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank')}
+                                  onClick={() => {
+                                    const diagUrl = getClientDiagnosticUrl(client.id || '');
+                                    if (diagUrl) {
+                                      window.open(diagUrl, '_blank');
+                                    } else {
+                                      window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank');
+                                    }
+                                  }}
                                   className="p-2 hover:bg-white/10 rounded-xl text-gold transition-all hover:scale-110" 
-                                  title="Ver Diagnóstico / Contrato"
+                                  title="Ver Diagnóstico Firmado"
                                 >
                                   <FileText size={18} />
                                 </button>

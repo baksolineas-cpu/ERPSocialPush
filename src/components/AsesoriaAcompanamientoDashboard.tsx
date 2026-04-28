@@ -49,11 +49,22 @@ export default function AsesoriaAcompanamientoDashboard() {
 
   const getClientUniverso = (clientId: string) => {
     const clientHojas = hojas
-      .filter((h: any) => h.clienteid === clientId || h.id_cliente === clientId)
-      .sort((a: any, b: any) => new Date(b.createdat || 0).getTime() - new Date(a.createdat || 0).getTime());
+      .filter((h: any) => h.clienteid === clientId || h.id_cliente === clientId || h.idcliente === clientId)
+      .sort((a: any, b: any) => new Date(b.createdat || b.fecha || 0).getTime() - new Date(a.createdat || a.fecha || 0).getTime());
     
     const universo = clientHojas.length > 0 ? (clientHojas[0].universo || 'U1') : 'U1';
     return universo === 'U2' ? 'Servicios Integrales' : 'Servicios Individuales';
+  };
+
+  const getClientDiagnosticUrl = (clientId: string) => {
+    const clientHojas = hojas
+      .filter((h: any) => h.clienteid === clientId || h.id_cliente === clientId || h.idcliente === clientId)
+      .sort((a: any, b: any) => new Date(b.createdat || b.fecha || 0).getTime() - new Date(a.createdat || a.fecha || 0).getTime());
+    
+    if (clientHojas.length > 0) {
+      return clientHojas[0].url_diagnostico || clientHojas[0].urldiagnostico;
+    }
+    return null;
   };
 
   const handlePaymentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,6 +181,7 @@ export default function AsesoriaAcompanamientoDashboard() {
                       filteredClients.map((client, i) => {
                         const id_carpeta = client.id_carpeta_drive || client.idcarpetadrive;
                         const hasSigned = client.estatusfirma === 'FIRMADO' || (client['estadoauditoría'] || client.estadoauditoria) === 'SERVICIO_ACTIVO';
+                        const statusAuditoria = client['estadoauditoría'] || client.estadoauditoria;
                         
                         return (
                         <tr key={i} className="hover:bg-white/10 transition-colors">
@@ -205,7 +217,7 @@ export default function AsesoriaAcompanamientoDashboard() {
                           </td>
                           <td className="px-8 py-6 text-right">
                             <div className="flex justify-end gap-3">
-                              {client.estadoauditoria !== 'SERVICIO_ACTIVO' && (
+                              {statusAuditoria !== 'SERVICIO_ACTIVO' && (
                                 <button 
                                   onClick={() => {
                                     setUploadingPaymentFor(client.id || client.curp || '');
@@ -228,9 +240,16 @@ export default function AsesoriaAcompanamientoDashboard() {
                                     <FolderOpen size={18} />
                                   </button>
                                   <button 
-                                    onClick={() => window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank')}
+                                    onClick={() => {
+                                      const diagUrl = getClientDiagnosticUrl(client.id || '');
+                                      if (diagUrl) {
+                                        window.open(diagUrl, '_blank');
+                                      } else {
+                                        window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank');
+                                      }
+                                    }}
                                     className="p-2.5 bg-gold/10 text-gold hover:bg-gold hover:text-black rounded-xl transition-all"
-                                    title="Ver Diagnóstico"
+                                    title="Ver Diagnóstico Firmado"
                                   >
                                     <FileText size={18} />
                                   </button>

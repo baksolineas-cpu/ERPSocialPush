@@ -284,6 +284,28 @@ function handleFinalizeAudit(payload) {
         // B. GENERACIÓN DE DIAGNÓSTICO CERTIFICADO
         const diagUrl = generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja);
         
+        // PERSISTENCIA DE URL EN HOJAS_SERVICIO
+        if (diagUrl && payload.id_hoja) {
+          try {
+            const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+            const sheetH = ss.getSheetByName("HOJAS_SERVICIO");
+            const dataH = sheetH.getDataRange().getValues();
+            const headersH = dataH[0].map(h => h.toString().toLowerCase().trim());
+            const idHojaCol = headersH.indexOf("id_hoja") !== -1 ? headersH.indexOf("id_hoja") : headersH.indexOf("id");
+            const urlDiagCol = headersH.indexOf("url_diagnostico");
+            
+            if (urlDiagCol !== -1) {
+              const searchHId = payload.id_hoja.toString().toUpperCase().trim();
+              for (let i = 1; i < dataH.length; i++) {
+                if (dataH[i][idHojaCol] && dataH[i][idHojaCol].toString().toUpperCase().trim() === searchHId) {
+                  sheetH.getRange(i + 1, urlDiagCol + 1).setValue(diagUrl);
+                  break;
+                }
+              }
+            }
+          } catch(eUrl) { logDebug("ERR_PERSIST_DIAG_URL", eUrl.toString()); }
+        }
+
         // C. AUTO-SELLADO (Upsell Logic)
         // Si el cliente ya tiene firma y selfie en su folder, sellamos el diagnóstico inmediatamente
         let prevFirma = null;
@@ -714,7 +736,7 @@ function handleCreateHoja(payload) {
     let sheet = ss.getSheetByName("HOJAS_SERVICIO");
     if (!sheet) {
       sheet = ss.insertSheet("HOJAS_SERVICIO");
-      sheet.appendRow(["ID_Hoja", "ID_Cliente", "Universo", "Servicios", "Monto", "Diagnostico", "Status", "Fecha", "Asesor", "FirmaAsesor"]);
+      sheet.appendRow(["ID_Hoja", "ID_Cliente", "Universo", "Servicios", "Monto", "Diagnostico", "Status", "Fecha", "Asesor", "FirmaAsesor", "NotasExtra", "URL_Diagnostico"]);
     }
     
     const data = sheet.getDataRange().getValues();
@@ -762,7 +784,8 @@ function handleCreateHoja(payload) {
       payload.createdAt || new Date().toISOString(),             // H: Fecha
       payload.asesor || "",                                      // I: Asesor
       payload.firmaAsesor || "",                                 // J: FirmaAsesor
-      payload.notasExtra || ""                                   // K: NotasExtra
+      payload.notasExtra || "",                                  // K: NotasExtra
+      payload.url_diagnostico || ""                              // L: URL_Diagnostico
     ];
     
     if (rowIndex > -1) {

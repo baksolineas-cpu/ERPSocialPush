@@ -128,13 +128,22 @@ export interface Cliente {
 
 export interface HojaServicio {
   id: string;
+  id_hoja?: string;
   clienteId: string;
+  id_cliente?: string;
+  clienteid?: string;
   universo: UniversoServicio;
-  servicios: string[];
+  servicios: string[] | string;
   honorariosAcordados: number;
+  monto?: number;
+  honorarios?: number;
   notasDiagnostico: string;
-  firmaDigitalUrl: string;
+  dictamen?: string;
+  firmaDigitalUrl?: string;
   createdAt: number;
+  fecha?: string;
+  url_diagnostico?: string;
+  urldiagnostico?: string;
 }
 
 export interface AuditLog {
