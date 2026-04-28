@@ -30,17 +30,25 @@ export async function extractDocumentData(base64Image: string, mimeType: string,
   const cleanBase64 = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
   
   let promptText = `Actúa como un extractor de datos oficial de México. Analiza este documento (${docType}) y extrae la información en un objeto JSON puro.
-Usa EXACTAMENTE estas claves, si el dato no está presente asigna un string vacío "":
-- "nombre": Nombre completo de la persona.
-- "curp": CURP (18 caracteres).
-- "rfc": RFC con homoclave (13 caracteres).
-- "nss": Número de Seguridad Social (11 dígitos).
-- "semanasCotizadas": Número de semanas reconocidas.
-- "ultimoSalario": Salario base de cotización o diario.
-- "regimenFiscal": Régimen fiscal o tipo de contribuyente.
-- "domicilio": Domicilio completo o dirección.
-- "patrones": Lista de los últimos patrones o razones sociales con las que cotizó (separados por coma, o estructurados en texto breve).
-No inventes datos. Devuelve SOLO el bloque JSON validado.`;
+  
+  PRIORIDAD TÉCNICA:
+  - Si el documento es una "Constancia de Semanas Cotizadas" o "Estado de Cuenta AFORE", busca agresivamente el NSS y el historial de aportaciones.
+  - El "nss" (Número de Seguridad Social) siempre tiene 11 dígitos.
+  - "semanasCotizadas" suele aparecer como "Semanas Reconocidas" o "Semanas para trámite de pensión".
+  - "ultimoSalario" puede aparecer como "SBC", "Salario Base de Cotización" o "Último Salario".
+
+  Usa EXACTAMENTE estas claves, si el dato no está presente asigna un string vacío "":
+  - "nombre": Nombre COMPLETO de la persona (incluyendo apellidos).
+  - "curp": CURP (18 caracteres).
+  - "rfc": RFC con homoclave (13 caracteres).
+  - "nss": Número de Seguridad Social (11 dígitos).
+  - "semanasCotizadas": Número de semanas reconocidas.
+  - "ultimoSalario": Salario base de cotización o diario (Límpialo de símbolos como $ o comas).
+  - "regimenFiscal": Régimen fiscal o tipo de contribuyente.
+  - "domicilio": Domicilio completo o dirección.
+  - "patrones": Lista de los últimos patrones o razones sociales.
+
+  No inventes datos. Devuelve SOLO el bloque JSON validado.`;
   
   if (docType === 'COMPLEMENTARIO') {
       promptText = `Analiza este documento complementario de Seguridad Social (México). 

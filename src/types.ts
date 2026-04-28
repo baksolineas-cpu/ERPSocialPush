@@ -144,6 +144,8 @@ export interface HojaServicio {
   fecha?: string;
   url_diagnostico?: string;
   urldiagnostico?: string;
+  urldiagnóstico?: string;
+  firmaurl?: string;
   asesor?: string;
   promotor?: string;
   pago_promotor?: string | number;

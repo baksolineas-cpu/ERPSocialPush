@@ -129,7 +129,6 @@ export default function OperacionesDashboard() {
   const [migrationModalStep, setMigrationModalStep] = useState<'Carga' | 'Revision'>('Carga');
   const [migrationData, setMigrationData] = useState({
     nombre: '',
-    apellidos: '',
     curp: '',
     rfc: '',
     nss: '',
@@ -392,7 +391,13 @@ export default function OperacionesDashboard() {
           if (extracted) {
              const fieldsToSync = ['nombre', 'curp', 'rfc', 'nss', 'semanasCotizadas', 'ultimoSalario', 'regimenFiscal', 'cp'];
              fieldsToSync.forEach(field => {
-                const val = (extracted as any)[field === 'cp' ? 'codigoPostal' : field];
+                let val = (extracted as any)[field === 'cp' ? 'codigoPostal' : field];
+                
+                // Limpieza adicional para montos
+                if (field === 'ultimoSalario' && typeof val === 'string') {
+                  val = parseFloat(val.replace(/[$,\s]/g, '')) || 0;
+                }
+
                 if (val && !mergedData[field as keyof typeof mergedData]) {
                    (mergedData as any)[field] = val;
                    newAiFields.add(field);
@@ -409,28 +414,6 @@ export default function OperacionesDashboard() {
       setIsExtractingDocuments(false);
       setMigrationModalStep('Revision');
     }
-  };
-
-  const parseCSV = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const lines = text.split('\n');
-      const parsed = lines.slice(1).map(line => {
-        const parts = line.split(',');
-        if (parts.length < 3) return null;
-        const [fecha, concepto, monto] = parts;
-        return {
-          fecha,
-          concepto,
-          monto: parseFloat(monto),
-          sugerencia: findSuggestedClient(concepto),
-          match: 85 // Mocked match percentage
-        };
-      }).filter(Boolean);
-      setCsvData(parsed);
-    };
-    reader.readAsText(file);
   };
 
   const handleSaveMigration = async () => {
@@ -455,7 +438,7 @@ export default function OperacionesDashboard() {
       if (res?.success) {
         setShowMigrationModal(false);
         setMigrationData({ 
-          nombre: '', apellidos: '', curp: '', rfc: '', nss: '', 
+          nombre: '', curp: '', rfc: '', nss: '', 
           email: '', cp: '', semanasCotizadas: 0, ultimoSalario: 0, 
           regimenFiscal: '', promotor: '', origen: 'Migración', whatsapp: '' 
         });
@@ -1167,8 +1150,7 @@ export default function OperacionesDashboard() {
                       <h4 className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em] pb-2 border-b border-white/5">Datos de Identidad</h4>
                       <div className="grid grid-cols-1 gap-6">
                         {[
-                          { label: 'Nombre(s)', key: 'nombre' },
-                          { label: 'Apellidos', key: 'apellidos' },
+                          { label: 'Nombre Completo', key: 'nombre' },
                           { label: 'CURP', key: 'curp', max: 18 },
                           { label: 'RFC', key: 'rfc', max: 13 },
                           { label: 'NSS', key: 'nss', max: 11 }
