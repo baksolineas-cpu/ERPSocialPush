@@ -96,6 +96,19 @@ export default function ExternalSignature() {
     }
   };
 
+  const transformDriveUrl = (url: string | null) => {
+    if (!url) return "";
+    // Handle Google Docs
+    if (url.includes('docs.google.com/document/d/')) {
+      return url.replace(/\/edit.*$/, '/preview');
+    }
+    // Handle standard Drive links
+    if (url.includes('drive.google.com') && !url.includes('/preview')) {
+      return url.replace('/view', '/preview');
+    }
+    return url;
+  };
+
   if (step === 3) {
     const waMessage = `Hola ${clientData?.nombre || 'Cliente'}. Tu expediente ha sido formalizado.\n\nPuedes descargar tus documentos aquí:\n${signedDocUrls.map(d => d.url).join('\n')}${folderUrl ? `\n\nTu carpeta de expediente completa en Drive:\n${folderUrl}` : ''}`;
     const waUrl = `https://api.whatsapp.com/send?phone=${(clientData?.whatsapp || '').toString().replace(/\D/g, '')}&text=${encodeURIComponent(waMessage)}`;
@@ -181,7 +194,7 @@ export default function ExternalSignature() {
                        </div>
                        <div className="relative group rounded-3xl overflow-hidden border-2 border-slate-100 shadow-inner bg-slate-50">
                           <iframe 
-                             src={contractUrl.includes('drive.google.com') && !contractUrl.includes('/preview') ? contractUrl.replace('/view', '/preview') : contractUrl} 
+                             src={transformDriveUrl(contractUrl)} 
                              className="w-full h-[700px] border-none"
                              title="Contrato"
                           />
@@ -197,7 +210,7 @@ export default function ExternalSignature() {
                        </div>
                        <div className="relative group rounded-3xl overflow-hidden border-2 border-slate-100 shadow-inner bg-slate-50">
                           <iframe 
-                             src={diagnosticoUrl.includes('drive.google.com') && !diagnosticoUrl.includes('/preview') ? diagnosticoUrl.replace('/view', '/preview') : diagnosticoUrl} 
+                             src={transformDriveUrl(diagnosticoUrl)} 
                              className="w-full h-[700px] border-none"
                              title="Diagnostico"
                           />

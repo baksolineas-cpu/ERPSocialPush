@@ -294,13 +294,8 @@ export default function EntrevistaHub() {
   const handleAutoSave = async () => {
     if (!data.id && !data.curp) return;
     try {
-      // Normalización de IDs antes de enviar (CURP10)
-      const rawId = (data.curp || data.id || "").toString().replace("NEW_", "");
-      const cleanId = rawId.substring(0, 10).toUpperCase();
-      
       const payloadNormalized = {
         ...data,
-        id: cleanId,
         curp: (data.curp || "").toUpperCase().trim()
       };
 
@@ -581,10 +576,11 @@ export default function EntrevistaHub() {
       setIsProcessing(true);
       try {
         const curp10 = data.curp.substring(0, 10).toUpperCase();
-        // Garantizar payload de 22 campos 
+        // Preservamos el ID temporal para el searchId del backend
+        const searchId = data.id;
         const payloadCompleto = {
           ...data,
-          id: curp10,
+          id: searchId,
           curp: data.curp.toUpperCase()
         };
         const res = await callGAS('CREATE_CLIENTE', payloadCompleto);
@@ -930,12 +926,12 @@ export default function EntrevistaHub() {
                                                 <label className="flex items-center justify-between cursor-pointer">
                                                     <div className="flex items-center gap-3">
                                                         <input type="checkbox" checked={isSelected} onChange={(e) => {
-                                                            const autoUniverso = (srv.toLowerCase().includes('modalidad') || srv.toLowerCase().includes('pti')) ? 'U2' : 'U1';
+                                                            const autoUniverso: 'U1' | 'U2' = (srv.toLowerCase().includes('modalidad') || srv.toLowerCase().includes('pti')) ? 'U2' : 'U1';
                                                             const updated = e.target.checked 
                                                                 ? [...hojaServicio.servicios, { nombre: srv, universo: autoUniverso, precio: 0 }]
                                                                 : hojaServicio.servicios.filter(s => s.nombre !== srv);
                                                             const total = updated.reduce((sum, s) => sum + s.precio, 0);
-                                                            const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
+                                                            const globalU: 'U1' | 'U2' = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
                                                             setHojaServicio(prev => ({...prev, servicios: updated, honorariosAcordados: total, universo: globalU}));
                                                         }} className="hidden"/>
                                                         <div className="flex flex-col">

@@ -92,7 +92,7 @@ function handleUpdateCliente(payload) {
     const idCol = headers.indexOf("id");
     const curpCol = headers.indexOf("curp");
     
-    const searchId = (payload.id || "").toString().toUpperCase().trim();
+    const searchId = (payload.id || "").toString().toUpperCase().replace("NEW_", "").trim();
     const searchCurp = (payload.curp || "").toString().toUpperCase().trim();
     
     let rowIndex = -1;
@@ -150,15 +150,20 @@ function handleUpdateSignature(payload) {
   const curpCol = headers.indexOf("curp");
   const estatusCol = headers.indexOf("estatusfirma");
 
-  const searchId = payload.clienteId.toString().toUpperCase();
+  const clientesArr = getSheetData("CLIENTES");
+  const idBruto = (payload.clienteId || "").toString().toUpperCase().replace("NEW_", "").trim();
+  const searchId = idBruto.substring(0, 10);
   logDebug("UPDATE_SIG", "Iniciando firma para: " + searchId);
+  
   let rowIndex = -1;
+  let rowObj = null;
 
-  for (let i = 1; i < data.length; i++) {
-    const rowId = data[i][idCol] ? data[i][idCol].toString().toUpperCase() : "";
-    const rowCurp = data[i][curpCol] ? data[i][curpCol].toString().toUpperCase() : "";
-    if (rowId === searchId || rowCurp === searchId) {
-      rowIndex = i;
+  for (let i = 0; i < clientesArr.length; i++) {
+    const c = clientesArr[i];
+    const rowId = (c.id || "").toString().toUpperCase().replace("NEW_", "").trim();
+    if (rowId === searchId || (c.curp && c.curp.toString().toUpperCase().includes(searchId))) {
+      rowIndex = i + 1; // 1-indexed for SpreadsheetApp
+      rowObj = c;
       break;
     }
   }
@@ -166,27 +171,38 @@ function handleUpdateSignature(payload) {
   if (rowIndex === -1) return createResponse({ success: false, error: "Cliente no encontrado" }, 404);
 
     // 1. Guardar archivos físicos en Drive
-    const rowObj = getSheetData("CLIENTES")[rowIndex - 1];
-    const folderId = rowObj.id_carpeta_drive || rowObj.idcarpetadrive || rowObj.idCarpetaDrive;
+    let folderId = rowObj.id_carpeta_drive || rowObj.idcarpetadrive || rowObj.idCarpetaDrive;
+    
+    if (!folderId) {
+      try {
+        const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+        const it = root.searchFolders(`title contains '[${searchId.substring(0,10)}]'`);
+        if (it.hasNext()) folderId = it.next().getId();
+      } catch(e) {}
+    }
     
     if (folderId) {
       try {
         const folder = DriveApp.getFolderById(folderId);
         if (payload.selfieBase64 && payload.selfieBase64.length > 50) {
-          const selfieBlob = Utilities.newBlob(Utilities.base64Decode(payload.selfieBase64.split(",")[1]), "image/jpeg", `SELFIE_${searchId}.jpg`);
+          const sRaw = payload.selfieBase64.includes(",") ? payload.selfieBase64.split(",")[1] : payload.selfieBase64;
+          const selfieBlob = Utilities.newBlob(Utilities.base64Decode(sRaw), "image/jpeg", `SELFIE_${searchId}.jpg`);
           const selfieFile = folder.createFile(selfieBlob);
           const selfieUrl = selfieFile.getUrl();
           selfieFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
           
-          // Buscar columna SelfieURL (Columna I)
+          // Buscar columna SelfieURL
           const selfieColIndex = headers.indexOf("selfieurl");
           if (selfieColIndex !== -1) {
             sheet.getRange(rowIndex + 1, selfieColIndex + 1).setValue(selfieUrl);
           }
         }
         if (payload.firmaBase64 && payload.firmaBase64.length > 50) {
-          const firmaBlob = Utilities.newBlob(Utilities.base64Decode(payload.firmaBase64.split(",")[1]), "image/png", `FIRMA_CLIENTE_${searchId}.png`);
-          folder.createFile(firmaBlob);
+          const fRaw = payload.firmaBase64.includes(",") ? payload.firmaBase64.split(",")[1] : payload.firmaBase64;
+          const firmaBlob = Utilities.newBlob(Utilities.base64Decode(fRaw), "image/png", `FIRMA_CLIENTE_${searchId}.png`);
+          const fFile = folder.createFile(firmaBlob);
+          fFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+          logDebug("SIGN_SAVED", "Imagen de firma guardada en Drive para: " + searchId);
         }
       } catch(e) { logDebug("SIG_SAVE_ERR", e.toString()); }
     }
@@ -228,10 +244,10 @@ function handleUpdateSignature(payload) {
         targetDocs.forEach(td => { if (fileName.includes(td) && !fileName.includes("_FIRMADO_")) shouldProcess = true; });
         
         if (shouldProcess && file.getMimeType() === MimeType.GOOGLE_DOCS) {
-           logDebug("STAMPING", "Procesando: " + fileName);
+            const docId = file.getId();
+            logDebug("STAMPING_MATCH", "Iniciando estampado de: " + fileName + " (ID: " + docId + ")");
            
            try {
-             const docId = file.getId();
              const doc = DocumentApp.openById(docId);
              const body = doc.getBody();
              
@@ -262,18 +278,17 @@ function handleUpdateSignature(payload) {
                replaceTextWithImageBlob(body, "{{IMAGEN_SELFIE}}", finalSelfieBlob, 140, 140);
              }
              
-             
              doc.saveAndClose();
-             Utilities.sleep(3000);
+             Utilities.sleep(2000);
              
-             // Generar PDF y Limpieza
+             // Generar PDF y Conservar Originales
              const pdfBlob = file.getAs('application/pdf');
              const pdfFile = folder.createFile(pdfBlob).setName(fileName + "_FIRMADO_" + transactionId + ".pdf");
              pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
              signedDocUrls.push({ name: pdfFile.getName(), url: pdfFile.getUrl() });
              
-             // ELIMINACION DEL DOC TEMPORAL SEGUN DIRECTIVA
-             file.setTrashed(true);
+             // Por requerimiento de auditoría, conservamos el DOC editable firmado hasta revisión manual
+             // file.setTrashed(true);
              
            } catch(err) { logDebug("ERR_STAMP", err.toString()); }
         }
@@ -301,156 +316,140 @@ function handleUpdateSignature(payload) {
  * y registra la hoja de servicio.
  */
 function handleFinalizeAudit(payload) {
-  logDebug("DEBUG_ENTRADA", "Payload recibido: " + JSON.stringify(payload));
-  // 1. Unificación de Identidad (ID) - SIEMPRE CURP10
-  const rawId = (payload.curp || payload.id || payload.clienteId || "").toString().replace("NEW_", "");
-  const searchId = rawId.substring(0, 10).toUpperCase();
+  logDebug("FINALIZE_AUDIT_START", "Iniciando flujo para: " + (payload.curp || payload.id));
   
-  if (!payload.id) payload.id = searchId;
-  payload.id_cliente = searchId;
+  const rawCurp = (payload.curp || "").toString().toUpperCase().trim();
+  const curp10 = rawCurp.substring(0, 10);
+  if (!curp10) return createResponse({ status: 'error', message: 'CURP Inválida o faltante' }, 400);
 
-  // Actualizamos el registro del cliente
+  // 1. Consolidación de Identidad y Carpeta
+  let folder;
   try {
-    handleCreateCliente(payload);
-  } catch(e) { logDebug("ERR_CLIENTE_UPDATE", e.toString()); }
-  
-  // Registramos formalmente la hoja de servicio (UPSERT)
-  try {
-    handleCreateHoja(payload);
-  } catch(e) { logDebug("ERR_HOJA_CREATION", e.toString()); }
-
-  // 3. GENERACIÓN DE DOCUMENTOS (Drive Iterator Fix + Autolimpieza)
-  try {
-    const clientes = getSheetData("CLIENTES");
-    let searchId = payload.curp ? payload.curp.substring(0, 10) : (payload.id || payload.clienteId);
-    
-    // FIX CRÍTICO: Recuperar el objeto cliente para evitar ReferenceError
-    const cliente = clientes.find(c => 
-      (c.id && c.id.toString().toUpperCase() === searchId) || 
-      (c.curp && c.curp.toString().toUpperCase().includes(searchId))
-    ) || payload;
-
-    let folder;
-    try {
-      folder = DriveApp.getFolderById(payload.id_carpeta_drive);
-    } catch(e) {
-      let folderIter = DriveApp.getFoldersByName('CLIENTE_' + searchId);
-      if (folderIter.hasNext()) {
-        folder = folderIter.next();
-      }
+    const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+    const folderIdMatch = payload.id_carpeta_drive || payload.idcarpetadrive;
+    if (folderIdMatch) {
+      folder = DriveApp.getFolderById(folderIdMatch);
+    } else {
+      const it = root.searchFolders(`title contains '[${curp10}]'`);
+      if (it.hasNext()) folder = it.next();
     }
-    if (!folder) throw new Error("No se encontró la carpeta.");
+  } catch(e) { logDebug("FOLDER_SEARCH_ERR", e.toString()); }
 
-    // --- CLONAR Y LIMPIAR CONTRATO ---
-    let contratoUrl = "";
-    try {
-      if (CONTRATO_TEMPLATE_ID && !CONTRATO_TEMPLATE_ID.includes("placeholder")) {
-        const templateDoc = DriveApp.getFileById(CONTRATO_TEMPLATE_ID);
-        const tempDoc = templateDoc.makeCopy("TEMP_CONTRATO_" + searchId, folder);
-        
-        const doc = DocumentApp.openById(tempDoc.getId());
-        const body = doc.getBody();
-        body.replaceText("{{nombre_cliente}}", cliente.nombre || "");
-        body.replaceText("{{NOMBRE_CLIENTE}}", cliente.nombre || "");
-        body.replaceText("{{CURP}}", cliente.curp || "");
-        body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
-        body.replaceText("{{NSS}}", cliente.nss || "");
-        
-        replaceTextWithImage(body, "{{firma_cliente}}", payload.firmaAsesor || payload.firmaAsesorBase64, "image/png", 220, 110);
-        replaceTextWithImage(body, "{{selfie}}", payload.selfieBase64, "image/jpeg", 140, 140);
-        
-        doc.saveAndClose();
-        Utilities.sleep(2000);
+  if (!folder) return createResponse({ status: 'error', message: 'No se localizó la carpeta del cliente para ' + curp10 }, 404);
+  const folderId = folder.getId();
 
-        const pdfBlob = tempDoc.getAs('application/pdf');
-        pdfBlob.setName("CONTRATO_MARCO_" + searchId + ".pdf");
-        const finalPdf = folder.createFile(pdfBlob);
-        finalPdf.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-        contratoUrl = finalPdf.getUrl();
-        
-        tempDoc.setTrashed(true); // BORRA EL EDITABLE (BASURA)
-      }
-    } catch(e) { logDebug("ERR_CONTRATO", e.toString()); }
+  // Sincronizar datos base
+  try {
+    handleCreateCliente({ ...payload, id: curp10 });
+    handleCreateHoja({ ...payload, clienteId: curp10 });
+  } catch(e) { logDebug("SYNC_ERR", e.toString()); }
 
-    // --- CLONAR Y LIMPIAR DIAGNOSTICO ---
-    let diagnosticoUrl = "";
-    try {
-      if (DIAGNOSTICO_TEMPLATE_ID && !DIAGNOSTICO_TEMPLATE_ID.includes("placeholder")) {
-        const diagTemplateDoc = DriveApp.getFileById(DIAGNOSTICO_TEMPLATE_ID);
-        const tempDiag = diagTemplateDoc.makeCopy("TEMP_DIAG_" + searchId, folder);
-        
-        const docDiag = DocumentApp.openById(tempDiag.getId());
-        const bodyDiag = docDiag.getBody();
-        bodyDiag.replaceText("{{nombre_cliente}}", cliente.nombre || "");
-        bodyDiag.replaceText("{{CURP}}", cliente.curp || "");
-        docDiag.saveAndClose();
-        Utilities.sleep(2000);
+  // Preparar Blobs
+  const getBlob = (base64, name, mime) => {
+    if (!base64 || base64.length < 50) return null;
+    const raw = base64.includes(",") ? base64.split(",")[1] : base64;
+    return Utilities.newBlob(Utilities.base64Decode(raw), mime, name);
+  };
 
-        const pdfBlobDiag = tempDiag.getAs('application/pdf');
-        pdfBlobDiag.setName("DIAGNOSTICO_CERTIFICADO_" + searchId + ".pdf");
-        const finalPdfDiag = folder.createFile(pdfBlobDiag);
-        finalPdfDiag.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-        diagnosticoUrl = finalPdfDiag.getUrl();
-        
-        tempDiag.setTrashed(true); // BORRA EL EDITABLE (BASURA)
-      } else {
-        diagnosticoUrl = generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja, payload.montoU2);
-      }
-    } catch(e) { logDebug("ERR_DIAGNOSTICO", e.toString()); }
+  const bFirmaCliente = getBlob(payload.firmaBase64 || payload.firmaCliente, "FIRMA_CLIENTE.png", "image/png");
+  const bFirmaAsesor = getBlob(payload.firmaAsesor || payload.firmaAsesorBase64, "FIRMA_ASESOR.png", "image/png");
+  const bSelfie = getBlob(payload.selfieBase64 || payload.selfie_url, "SELFIE.jpg", "image/jpeg");
 
-    // Persistencia de URLs en Sheets
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheetClientes = ss.getSheetByName("CLIENTES");
-    if (sheetClientes) {
-      const cDataArr = sheetClientes.getDataRange().getValues();
-      const cHeadersArr = cDataArr[0].map(h => h.toString().toLowerCase().trim());
-      const cidColIdx = cHeadersArr.indexOf("id");
-      const cContratoIdx = cHeadersArr.indexOf("contrato_url");
-      const cDiagIdx = cHeadersArr.indexOf("url_diagnostico");
-      const audColIdx = cHeadersArr.indexOf("estadoauditoria") !== -1 ? cHeadersArr.indexOf("estadoauditoria") : cHeadersArr.indexOf("estado auditoría");
+  const pdfUrls = { contrato: "", diagnostico: "" };
 
-      for (let i = 1; i < cDataArr.length; i++) {
-        const rowIdVal = cDataArr[i][cidColIdx] ? cDataArr[i][cidColIdx].toString().toUpperCase().trim() : "";
-        if (rowIdVal === searchId.toUpperCase().trim()) {
-          if (contratoUrl && cContratoIdx !== -1) sheetClientes.getRange(i+1, cContratoIdx + 1).setValue(contratoUrl);
-          if (diagnosticoUrl && cDiagIdx !== -1) sheetClientes.getRange(i+1, cDiagIdx + 1).setValue(diagnosticoUrl);
-          if (audColIdx !== -1) sheetClientes.getRange(i+1, audColIdx + 1).setValue("AUDITORIA_FINALIZADA");
-          break;
-        }
+  // Paso 2 & 4: Contrato Marco -> PDF
+  try {
+    if (CONTRATO_TEMPLATE_ID && !CONTRATO_TEMPLATE_ID.includes("placeholder")) {
+      const copy = DriveApp.getFileById(CONTRATO_TEMPLATE_ID).makeCopy("TEMP_CONTRATO_" + curp10, folder);
+      const doc = DocumentApp.openById(copy.getId());
+      const body = doc.getBody();
+      
+      const cleanRepl = (tag, val) => body.replaceText(tag, val || "");
+      cleanRepl("{{NOMBRE_CLIENTE}}", payload.nombre);
+      cleanRepl("{{nombre_cliente}}", payload.nombre);
+      cleanRepl("{{CURP}}", rawCurp);
+      cleanRepl("{{NSS}}", payload.nss);
+      cleanRepl("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
+      
+      if (bSelfie) replaceTextWithImageBlob(body, "{{IMAGEN_SELFIE}}", bSelfie, 140, 140);
+      if (bFirmaCliente) replaceTextWithImageBlob(body, "{{FIRMA_CLIENTE}}", bFirmaCliente, 200, 100);
+      if (bFirmaAsesor) replaceTextWithImageBlob(body, "{{FIRMA_ASESOR}}", bFirmaAsesor, 200, 100);
+      
+      doc.saveAndClose();
+      
+      const pdfBlob = copy.getAs('application/pdf');
+      const pdfFile = folder.createFile(pdfBlob).setName("CONTRATO_MARCO_" + curp10 + ".pdf");
+      pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      pdfUrls.contrato = pdfFile.getUrl();
+      
+      // Paso 5: Autolimpieza
+      copy.setTrashed(true);
+    }
+  } catch(e) { logDebug("CONTRATO_GEN_ERR", e.toString()); }
+
+  // Paso 3 & 4: Diagnóstico -> PDF
+  try {
+    let diagDocFile;
+    if (DIAGNOSTICO_TEMPLATE_ID && !DIAGNOSTICO_TEMPLATE_ID.includes("placeholder")) {
+      diagDocFile = DriveApp.getFileById(DIAGNOSTICO_TEMPLATE_ID).makeCopy("TEMP_DIAGNOSTICO_" + curp10, folder);
+      const doc = DocumentApp.openById(diagDocFile.getId());
+      const body = doc.getBody();
+      
+      body.replaceText("{{NOMBRE_CLIENTE}}", payload.nombre || "");
+      body.replaceText("{{CURP}}", rawCurp);
+      body.replaceText("{{DIAGNOSTICO}}", payload.dictamen || payload.diagnosticoTexto || "");
+      body.replaceText("{{SERVICIOS}}", payload.serviciosContratados || (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : payload.servicios) || "");
+      body.replaceText("{{MONTO}}", payload.montoAcordado || payload.monto || "");
+      
+      if (bFirmaAsesor) replaceTextWithImageBlob(body, "{{FIRMA_ASESOR}}", bFirmaAsesor, 180, 90);
+      if (bFirmaCliente) replaceTextWithImageBlob(body, "{{FIRMA_CLIENTE}}", bFirmaCliente, 180, 90);
+      
+      doc.saveAndClose();
+    } else {
+      const docUrl = generateDiagnosticDoc(payload, payload.servicios, payload.montoAcordado, payload.asesor, payload.firmaAsesor, payload.id_hoja, payload.montoU2);
+      if (docUrl) {
+        const docId = docUrl.split("/d/")[1].split("/")[0];
+        diagDocFile = DriveApp.getFileById(docId);
       }
     }
 
-    if (diagnosticoUrl && payload.id_hoja) {
-      const isU2 = payload.universo === 'U2' || (payload.serviciosU2 && payload.montoU2 > 0);
-      let sheetH = ss.getSheetByName(isU2 ? "GESTIONES_U2" : "HOJAS_SERVICIO");
-      if (sheetH) {
-        const dH = sheetH.getDataRange().getValues(); 
-        const headersH = dH[0].map(h => h.toString().toLowerCase().trim());
-        const idCol = headersH.indexOf("id_hoja") !== -1 ? headersH.indexOf("id_hoja") : headersH.indexOf("id");
-        let uCol = headersH.indexOf("url_diagnostico");
-        if (uCol === -1) uCol = headersH.indexOf("firmaurl");
-        for (let i = 1; i < dH.length; i++) { 
-          if (dH[i][idCol] && dH[i][idCol].toString().toUpperCase().trim() === payload.id_hoja.toString().toUpperCase().trim()) { 
-            sheetH.getRange(i + 1, uCol + 1).setValue(diagnosticoUrl); 
-            break; 
-          } 
-        }
-      }
+    if (diagDocFile) {
+      const pdfBlob = diagDocFile.getAs('application/pdf');
+      const pdfFile = folder.createFile(pdfBlob).setName("DIAGNOSTICO_CERTIFICADO_" + curp10 + ".pdf");
+      pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      pdfUrls.diagnostico = pdfFile.getUrl();
+      
+      // Paso 5: Autolimpieza
+      diagDocFile.setTrashed(true);
     }
-  } catch(e) { logDebug("ERR_DOC_GEN_MAIN", e.toString()); }
+  } catch(e) { logDebug("DIAG_GEN_ERR", e.toString()); }
 
-  return createResponse({ success: true, id: searchId });
+  return createResponse({ 
+    success: true, 
+    id: curp10, 
+    pdfUrls: pdfUrls 
+  });
 }
 
-function generateDiagnosticPDF(clientData, servicesData, montoTotal, asesorName, firmaAsesorBase64, idHoja, montoU2) {
+function generateDiagnosticDoc(clientData, servicesData, montoTotal, asesorName, firmaAsesorBase64, idHoja, montoU2) {
   try {
-    const folderId = clientData.id_carpeta_drive || clientData.idcarpetadrive;
+    const rawId = (clientData.id || clientData.curp || "").toString().replace("NEW_", "");
+    const searchId = rawId.substring(0, 10).toUpperCase();
+
+    let folderId = clientData.id_carpeta_drive || clientData.idcarpetadrive;
+    if (!folderId) {
+      const it = DriveApp.getFolderById(ROOT_FOLDER_ID).searchFolders(`title contains '[${searchId}]'`);
+      if (it.hasNext()) folderId = it.next().getId();
+    }
     if (!folderId) return;
     const folder = DriveApp.getFolderById(folderId);
 
-    // Crear Documento Temporal con VERSIONAMIENTO (ID_Hoja o Timestamp)
+    // Crear Documento Temporal con VERSIONAMIENTO
     const suffix = idHoja || new Date().getTime();
     const doc = DocumentApp.create("DIAGNOSTICO_CERTIFICADO_" + clientData.curp + "_" + suffix);
+    const docFile = DriveApp.getFileById(doc.getId());
+    docFile.moveTo(folder); // Moverlo a la carpeta del cliente
+    
     const body = doc.getBody();
 
     // 1. ENCABEZADO BAKSO S.C.
@@ -510,18 +509,9 @@ function generateDiagnosticPDF(clientData, servicesData, montoTotal, asesorName,
 
     
     doc.saveAndClose();
-    Utilities.sleep(2000);
-    
-    // CONVERSIÓN A PDF Y TRASH DEL DOC
-    const docFile = DriveApp.getFileById(doc.getId());
-    const pdfBlob = docFile.getAs('application/pdf');
-    const finalPdf = folder.createFile(pdfBlob).setName(`DIAGNOSTICO_CERTIFICADO_${clientData.curp}_${suffix}.pdf`);
-    finalPdf.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    
-    docFile.setTrashed(true);
-    return finalPdf.getUrl();
+    return docFile.getUrl(); // Retornar URL del DOC editable
   } catch(e) {
-    logDebug("ERR_GEN_DIAG_PDF_HELPER", e.toString());
+    logDebug("ERR_GEN_DIAG_DOC_HELPER", e.toString());
   }
 }
 
@@ -532,70 +522,7 @@ function doGet(e) {
       return handleLogin(e.parameter.email);
     }
     if (action === 'GET_CLIENTE_STATUS') {
-      const identifier = (e.parameter.curp || e.parameter.id || "").toString().toUpperCase();
-      if (!identifier) return createResponse({ status: 'error' }, 400);
-      
-      const clientes = getSheetData("CLIENTES");
-      // CORRECCIÓN CRÍTICA: Busca tanto en la columna ID (A) como en la columna CURP (D)
-      const cliente = clientes.find(c => 
-        (c.id && c.id.toString().toUpperCase() === identifier) || 
-        (c.curp && c.curp.toString().toUpperCase() === identifier)
-      );
-      
-      if (cliente) {
-        const folderId = cliente.id_carpeta_drive || cliente.idcarpetadrive;
-        if (folderId) {
-          try {
-            const folder = DriveApp.getFolderById(folderId);
-            cliente.folder_url = folder.getUrl();
-            const files = folder.getFiles();
-            cliente.drive_verificado = true;
-            while (files.hasNext()) {
-              const f = files.next();
-              const name = f.getName().toUpperCase();
-              const url = f.getUrl();
-              if (name.includes("INE")) cliente.ine_url = url;
-              if (name.includes("FISCAL") || name.includes("CSF")) cliente.csf_url = url;
-              if (name.includes("DOMICILIO") || name.includes("COMPROBANTE")) cliente.domicilio_url = url;
-              if (name.includes("SEMANAS")) cliente.semanas_url = url;
-              if (name.includes("AFORE")) cliente.afore_url = url;
-              if (name.includes("SELFIE")) cliente.selfie_url = url;
-              if (name.includes("CONTRATO") && !name.includes("FIRMADO")) cliente.contrato_url = url;
-              if (name.includes("COMPLEMENTARIO")) cliente.complementario_url = url;
-            }
-          } catch(err) { cliente.drive_verificado = false; }
-        }
-        
-        // CORRECCIÓN CRÍTICA: Buscar Diagnóstico (Hoja de Servicio) para el portal de firma
-        const hojas = getSheetData("HOJAS_SERVICIO");
-        const miHoja = hojas.reverse().find(h => 
-          (h.id_cliente && h.id_cliente.toString().toUpperCase() === identifier) ||
-          (h.idcliente && h.idcliente.toString().toUpperCase() === identifier) ||
-          (h.clienteid && h.clienteid.toString().toUpperCase() === identifier) ||
-          (h.id && h.id.toString().toUpperCase() === identifier)
-        );
-        
-        if (miHoja) {
-          cliente.hojaservicio = miHoja;
-          // Mapeo específico para compatibilidad con el frontend
-          cliente.diagnosticoTexto = miHoja.diagnostico || miHoja.dictamen || miHoja.notasdiagnostico || miHoja.notas || "";
-          cliente.serviciosContratados = miHoja.servicios || "";
-          cliente.montoAcordado = miHoja.honorarios || "0.00";
-          cliente.asesorAsignado = miHoja.asesor || "";
-          cliente.firmaAsesor = miHoja.firmaasesor || "";
-          // Refuerzo de visualización: Si el monto viene en 0, lo forzamos a mostrar lo que hallemos en el registro (honorarios)
-          const finalMonto = miHoja.honorarios ? Number(miHoja.honorarios) : 0;
-          cliente.monto = finalMonto.toFixed(2);
-          cliente.montoTotal = finalMonto;
-          cliente.montoAcordado = finalMonto.toFixed(2);
-        }
-        
-        // RESTRICCIÓN DE VISUALIZACIÓN: Usar estrictamente el ID del contrato protegido proporcionado por el usuario
-        cliente.contrato_url = `https://drive.google.com/file/d/1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk/preview`;
-
-        return createResponse({ status: 'success', data: cliente });
-      }
-      return createResponse({ status: 'error' }, 404);
+      return handleGetClienteStatus(e.parameter);
     }
     if (action === 'GET_DATA') return handleGetData(e.parameter.sheetName);
     return createResponse({ message: "API BAKSO Activa" });
@@ -605,6 +532,10 @@ function doGet(e) {
   }
 }
 
+/**
+ * Consulta de estatus del cliente para el portal externo.
+ * Paso 6: Busca archivos PDF específicos en Drive y devuelve sus URLs.
+ */
 function handleGetClienteStatus(payload) {
   try {
     const identifier = payload.curp || payload.id || payload.clienteId;
@@ -612,58 +543,81 @@ function handleGetClienteStatus(payload) {
     
     // Normalizar ID de búsqueda a CURP10
     const rawId = identifier.toString().replace("NEW_", "");
-    const searchId = rawId.substring(0, 10).toUpperCase();
+    const curp10 = rawId.substring(0, 10).toUpperCase();
 
-    const clientes = getSheetData("CLIENTES");
-    const identifierUpper = identifier.toString().toUpperCase().trim();
-    const cliente = clientes.find(c => 
-      (c.id && c.id.toString().toUpperCase().trim() === identifierUpper) || 
-      (c.curp && c.curp.toString().toUpperCase().trim() === identifierUpper) ||
-      (c.id && c.id.toString().toUpperCase().trim() === searchId)
+    const clientesArr = getSheetData("CLIENTES");
+    const cliente = clientesArr.find(c => 
+      (c.id && c.id.toString().toUpperCase().trim().includes(curp10)) || 
+      (c.curp && c.curp.toString().toUpperCase().trim().includes(curp10))
     );
     
     if (cliente) {
-      let folderIter = DriveApp.getFoldersByName('CLIENTE_' + searchId);
-      if (folderIter.hasNext()) {
-        let folder = folderIter.next();
+      // 1. Localizar Carpeta
+      let folder;
+      try {
+        const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+        const folderId = cliente.id_carpeta_drive || cliente.idcarpetadrive;
+        if (folderId) {
+          folder = DriveApp.getFolderById(folderId);
+        } else {
+          const it = root.searchFolders(`title contains '[${curp10}]'`);
+          if (it.hasNext()) folder = it.next();
+        }
+      } catch(e) {}
+
+      if (folder) {
         cliente.folder_url = folder.getUrl();
         cliente.drive_verificado = true;
-        let files = folder.getFiles();
+        
+        // Paso 6: Buscar SOLO archivos PDF específicos
+        const files = folder.getFiles();
         while (files.hasNext()) {
-          let file = files.next();
-          let name = file.getName();
-          if (name.startsWith("CONTRATO_MARCO") && name.endsWith(".pdf")) {
-            cliente.contrato_url = file.getUrl();
+          const file = files.next();
+          const name = file.getName();
+          const isPdf = file.getMimeType() === MimeType.PDF || name.toLowerCase().endsWith(".pdf");
+          
+          if (isPdf) {
+            if (name.startsWith("CONTRATO_MARCO")) {
+              cliente.contrato_url = file.getUrl();
+            }
+            if (name.startsWith("DIAGNOSTICO_CERTIFICADO")) {
+              cliente.diagnostico_url = file.getUrl();
+            }
           }
-          if (name.startsWith("DIAGNOSTICO_CERTIFICADO") && name.endsWith(".pdf")) {
-            cliente.diagnostico_url = file.getUrl();
-          }
-          if (name.includes("INE")) cliente.ine_url = file.getUrl();
-          if (name.includes("FISCAL") || name.includes("CSF")) cliente.csf_url = file.getUrl();
+          
+          // Otros archivos de interés (INE, etc)
+          if (name.toUpperCase().includes("INE")) cliente.ine_url = file.getUrl();
+          if (name.toUpperCase().includes("FISCAL") || name.toUpperCase().includes("CSF")) cliente.csf_url = file.getUrl();
         }
       }
 
-      // Append hoja de servicio
+      // Sincronizar con Hoja de Servicio para mostrar montos y diagnóstico
       try {
         const hojas = getSheetData("HOJAS_SERVICIO");
-        const searchId = identifier.toString().substring(0, 10).toUpperCase();
-        const hoja = hojas.find(h => 
-          (h.id_cliente && h.id_cliente.toString().toUpperCase() === searchId) ||
-          (h.clienteid && h.clienteid.toString().toUpperCase() === searchId) ||
-          (h.idcliente && h.idcliente.toString().toUpperCase() === searchId) ||
-          (h.id && h.id.toString().toUpperCase() === searchId)
-        );
+        const hoja = hojas.reverse().find(h => {
+          const rowId = (h.id_cliente || h.clienteid || h.id || "").toString().toUpperCase();
+          return rowId.includes(curp10);
+        });
+        
         if (hoja) {
           cliente.hojaservicio = hoja;
-          cliente.montoTotal = hoja.honorarios || "0.00";
-          if (hoja.url_diagnostico) cliente.diagnostico_url = hoja.url_diagnostico;
+          // Mapeo enriquecido para el portal
+          cliente.diagnosticoTexto = hoja.diagnostico || hoja.dictamen || "";
+          cliente.serviciosContratados = hoja.servicios || "";
+          cliente.montoTotal = (hoja.monto || hoja.honorarios || 0).toString();
+          cliente.montoAcordado = cliente.montoTotal;
+          cliente.asesorAsignado = hoja.asesor || "";
+          if (hoja.url_diagnostico && hoja.url_diagnostico.toLowerCase().endsWith(".pdf")) {
+            cliente.diagnostico_url = hoja.url_diagnostico;
+          }
         }
       } catch(e) {}
 
       return createResponse({ status: 'success', data: cliente });
     }
-    return createResponse({ status: 'error', message: 'No encontrado' }, 404);
+    return createResponse({ status: 'error', message: 'Cliente no encontrado' }, 404);
   } catch(e) {
+    logDebug("ERR_GET_STATUS", e.toString());
     return createResponse({ status: 'error', error: e.toString() }, 500);
   }
 }
@@ -693,16 +647,21 @@ function handleCreateCliente(payload) {
     const curpCol = headers.indexOf("curp");
     const idCol = headers.indexOf("id");
     
-    // 1. BLINDAJE DE BÚSQUEDA: Busca por CURP o por ID
+    // 1. BLINDAJE DE BÚSQUEDA: Busca por CURP o por ID (Soporta renames)
     let existingRowIndex = -1;
-    const searchId = (payload.id || "").toString().toUpperCase().trim();
+    const searchId = (payload.id || "").toString().toUpperCase().replace("NEW_", "").trim();
     const searchCurp = (payload.curp || "").toString().toUpperCase().trim();
+    const searchClienteId = (payload.clienteId || "").toString().toUpperCase().replace("NEW_", "").trim();
     
     for (let i = 1; i < values.length; i++) {
-      const rowId = values[i][idCol] ? values[i][idCol].toString().toUpperCase().trim() : "";
+      const rowIdRaw = values[i][idCol] ? values[i][idCol].toString().toUpperCase().replace("NEW_", "").trim() : "";
+      const rowId = rowIdRaw.substring(0, 10);
       const rowCurp = values[i][curpCol] ? values[i][curpCol].toString().toUpperCase().trim() : "";
       
-      if ((searchCurp && rowCurp === searchCurp) || (searchId && rowId === searchId)) {
+      // Coincidencia robusta por CURP, por ID normalized (id) o por ID de sesión (clienteId)
+      if ((searchCurp && rowCurp === searchCurp) || 
+          (searchId && rowId === searchId.substring(0, 10)) ||
+          (searchClienteId && rowId === searchClienteId.substring(0, 10))) {
         existingRowIndex = i;
         break;
       }
@@ -771,11 +730,13 @@ function handleCreateCliente(payload) {
           if (folders.hasNext()) {
              const folder = folders.next();
              folderId = folder.getId();
+             payload.id_carpeta_drive = folderId; // ACTUALIZACIÓN PARA REUSO EN PAYLOAD
              logDebug("FOLDER_SYNC", "Carpeta encontrada en Drive: " + folderId);
           } else {
              const folderName = `[${curp10}] ${payload.nombre || "NUEVO"}`;
              const folder = rootFolder.createFolder(folderName);
              folderId = folder.getId();
+             payload.id_carpeta_drive = folderId; // ACTUALIZACIÓN PARA REUSO EN PAYLOAD
              if (payload.email && payload.email.indexOf('@') > -1) {
                try { folder.addViewer(payload.email); } catch(e) {}
              }
@@ -791,7 +752,7 @@ function handleCreateCliente(payload) {
     if (folderId && folderId.length > 5 && payload.nombre) {
       try {
         const folder = DriveApp.getFolderById(folderId);
-        if (folder && folder.getName().includes("NUEVO")) {
+        if (folder && (!folder.getName().includes(curp10) || folder.getName().includes("NUEVO"))) {
            folder.setName(`[${curp10}] ${payload.nombre}`.trim());
         }
       } catch(e) {
@@ -873,8 +834,8 @@ function handleCreateHoja(payload) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const searchHojaId = (payload.id_hoja || Utilities.getUuid()).toString().toUpperCase().trim();
-    const rawCid = (payload.clienteId || payload.id || "").toString().replace("NEW_", "");
-    const searchClienteId = rawCid.substring(0, 10).toUpperCase();
+    const idBruto = (payload.clienteId || payload.id || "").toString().toUpperCase().replace("NEW_", "").trim();
+    const searchClienteId = idBruto.substring(0, 10).toUpperCase();
 
     let isMigracion = (payload.origen && (payload.origen.toLowerCase().includes('socio') || payload.origen.toLowerCase().includes('migra'))) || payload.esMigracion || payload.isMigracion;
     let tienePromotor = (payload.promotor && payload.promotor.trim() !== '') ? true : false;
@@ -904,29 +865,31 @@ function handleCreateHoja(payload) {
       }
     } catch(e) {}
     
-    let montoTotal = parseFloat(payload.montoAcordado || payload.honorariosAcordados || payload.monto || 0);
+    let montoTotal = parseNumeric(payload.montoAcordado || payload.honorariosAcordados || payload.monto || 0);
     
     // RUTEO INTELIGENTE DE UNIVERSO (Directiva: 'Modalidad 40' o 'PTI' -> U2)
     const serviciosGlobalStr = (payload.serviciosU1 || "") + (payload.serviciosU2 || "") + (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || ""));
     const forceU2 = serviciosGlobalStr.includes('Modalidad 40') || serviciosGlobalStr.includes('PTI') || serviciosGlobalStr.includes('Modalidad 10');
     const hasU2 = forceU2 || payload.universo === 'U2' || (payload.serviciosU2 && payload.montoU2 > 0);
 
-    // Inteligencia de Carpetas (Subcarpetas U2)
+    // Intelligence de Carpetas (Subcarpetas U2)
     if (hasU2 && folderId) {
       try {
         const folder = DriveApp.getFolderById(folderId);
-        const nameLC = `${searchClienteId}_LC`;
-        const nameCI = `${searchClienteId}_CI`;
-        const folders = folder.getFolders();
-        let hasLC = false, hasCI = false;
-        while(folders.hasNext()) {
-          let f = folders.next();
-          if (f.getName() === nameLC) hasLC = true;
-          if (f.getName() === nameCI) hasCI = true;
+        if (folder) {
+          const nameLC = `${searchClienteId}_LC`;
+          const nameCI = `${searchClienteId}_CI`;
+          const subFolders = folder.getFolders();
+          let hasLC = false, hasCI = false;
+          while(subFolders.hasNext()) {
+            let f = subFolders.next();
+            if (f.getName() === nameLC) hasLC = true;
+            if (f.getName() === nameCI) hasCI = true;
+          }
+          if (!hasLC) folder.createFolder(nameLC);
+          if (!hasCI) folder.createFolder(nameCI);
         }
-        if (!hasLC) folder.createFolder(nameLC);
-        if (!hasCI) folder.createFolder(nameCI);
-      } catch(e) {}
+      } catch(e) { logDebug("ERR_U2_FOLDERS", e.toString()); }
     }
 
     const getOrInitSheet = (sheetName, isU2Sheet) => {
@@ -953,7 +916,7 @@ function handleCreateHoja(payload) {
 
     // PARTE 1: HOJAS_SERVICIO (UPSERT por ClienteID y Universo)
     let serviciosU1Str = payload.serviciosU1 || (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || ""));
-    let montoU1 = parseFloat(payload.monto1 || payload.montoU1 || payload.monto || 0);
+    let montoU1 = parseNumeric(payload.monto1 || payload.montoU1 || payload.monto || 0);
 
     const sheetU1Obj = getOrInitSheet("HOJAS_SERVICIO", false);
     
@@ -963,11 +926,13 @@ function handleCreateHoja(payload) {
 
     let rowIndexU1 = -1;
     for (let i = 1; i < sheetU1Obj.data.length; i++) {
-        const rowCid = (idClienteColIdx !== -1 && sheetU1Obj.data[i][idClienteColIdx]) ? sheetU1Obj.data[i][idClienteColIdx].toString().toUpperCase().trim() : "";
-        const rowUniv = (universoColIdx !== -1 && sheetU1Obj.data[i][universoColIdx]) ? sheetU1Obj.data[i][universoColIdx].toString().toUpperCase().trim() : "";
-        const targetUniv = (payload.universo || (hasU2 ? "U1/U2" : "U1")).toUpperCase();
+        let rowCid = (idClienteColIdx !== -1 && sheetU1Obj.data[i][idClienteColIdx]) 
+            ? sheetU1Obj.data[i][idClienteColIdx].toString().toUpperCase().replace("NEW_", "").trim() 
+            : "";
         
-        if (rowCid === searchClienteId && rowUniv === targetUniv) {
+        // Búsqueda robusta por ClienteID (Ignoramos Universo para evitar duplicados por transición U1/U2)
+        // Buscamos coincidencia con searchClienteId (Nuevo) o con payload.id (Viejo)
+        if (rowCid === searchClienteId || (payload.id && rowCid === payload.id.toString().toUpperCase().replace("NEW_", ""))) {
             rowIndexU1 = i; break;
         }
     }
@@ -983,9 +948,9 @@ function handleCreateHoja(payload) {
       }
     };
 
-    mapValFlex(["id", "id_hoja"], rowIndexU1 > -1 ? rowDataU1[sheetU1Obj.headers.indexOf("id") !== -1 ? sheetU1Obj.headers.indexOf("id") : sheetU1Obj.headers.indexOf("id_hoja")] : searchHojaId);
+    mapValFlex(["id", "id_hoja"], rowIndexU1 > -1 && rowDataU1[sheetU1Obj.headers.indexOf("id") !== -1 ? sheetU1Obj.headers.indexOf("id") : sheetU1Obj.headers.indexOf("id_hoja")] ? rowDataU1[sheetU1Obj.headers.indexOf("id") !== -1 ? sheetU1Obj.headers.indexOf("id") : sheetU1Obj.headers.indexOf("id_hoja")] : searchHojaId);
     mapValFlex(["clienteid", "id_cliente"], searchClienteId);
-    mapValFlex(["universo"], payload.universo || (hasU2 ? "U1/U2" : "U1"));
+    mapValFlex(["universo"], hasU2 ? "U2" : "U1"); // Actualizar el universo correcto
     mapValFlex(["servicios"], serviciosU1Str);
     mapValFlex(["monto"], montoU1);
     mapValFlex(["diagnostico", "dictamen"], payload.notasDiagnostico || payload.dictamen || "");
@@ -1032,7 +997,7 @@ function handleCreateHoja(payload) {
       const rowDataU2 = rowIndexU2 > -1 ? [...sheetU2Obj.data[rowIndexU2]] : new Array(sheetU2Obj.headers.length).fill("");
       while(rowDataU2.length < sheetU2Obj.headers.length) rowDataU2.push("");
 
-      let montoU2 = parseFloat(payload.montoU2 || payload.monto || 0);
+      let montoU2 = parseNumeric(payload.montoU2 || payload.monto || 0);
 
       // MOTOR MATEMÁTICO U2
       let honorariosFijos = 0; // Reset a 0 por directiva
@@ -1200,6 +1165,13 @@ function handleLogAction(payload, email) {
 
 function createResponse(data, code = 200) {
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function parseNumeric(val) {
+  if (typeof val === 'number') return val;
+  if (!val) return 0;
+  let clean = val.toString().replace(/,/g, '.').replace(/[^\d.-]/g, '');
+  return parseFloat(clean) || 0;
 }
 
 function replaceTextWithImage(body, searchText, base64Data, mimeType, width, height) {
