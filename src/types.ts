@@ -1,6 +1,6 @@
 export type UniversoServicio = 'U1' | 'U2';
 export type EstatusGestion = 'Pendiente' | 'Recurso Recibido' | 'Pagado IMSS' | 'Finalizado';
-export type UserRole = 'Admin' | 'Promoción';
+export type UserRole = 'Admin' | 'Promoción' | 'Capital Humano';
 export type EstatusExpediente = 'Completo' | 'Pendiente de Gestoría';
 export type NivelCerteza = 'Alto' | 'Bajo - Sujeto a Verificación' | 'Bajo';
 
@@ -144,6 +144,9 @@ export interface HojaServicio {
   fecha?: string;
   url_diagnostico?: string;
   urldiagnostico?: string;
+  asesor?: string;
+  promotor?: string;
+  pago_promotor?: string | number;
 }
 
 export interface AuditLog {

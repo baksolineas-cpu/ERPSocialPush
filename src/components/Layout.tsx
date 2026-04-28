@@ -38,6 +38,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Operaciones', href: '/operaciones', icon: Briefcase, roles: ['Admin'] },
     { name: 'Tesorería', href: '/tesoreria', icon: DollarSign, roles: ['Admin'] },
     { name: 'Contabilidad', href: '/contabilidad', icon: BookOpen, roles: ['Admin'] },
+    { name: 'Capital Humano', href: '/capital-humano', icon: Users, roles: ['Admin', 'Capital Humano'] },
     { name: 'Administración', href: '/admin', icon: Settings, roles: ['Admin'] },
   ];
 

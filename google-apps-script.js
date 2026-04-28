@@ -57,6 +57,8 @@ function doPost(e) {
       return handleRecordPayment(payload);
     } else if (action === 'RPA_UPLOAD') {
       return handleRpaUpload(payload);
+    } else if (action === 'PAY_COMMISSION') {
+      return handlePayCommission(payload);
     } else {
       return createResponse({ error: 'Acción no válida: ' + action }, 400);
     }
@@ -1368,5 +1370,32 @@ function handleRpaUpload(payload) {
     return createResponse({ success: true, fileName: fileName, message: "Guardado en " + targetSubfolderName });
   } catch(e) {
     return createResponse({ error: e.toString() }, 500);
+  }
+}
+
+function handlePayCommission(payload) {
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(10000); } catch(e) {}
+  
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    let sheet = ss.getSheetByName("COMISIONES_PAGADAS");
+    if (!sheet) {
+      sheet = ss.insertSheet("COMISIONES_PAGADAS");
+      sheet.appendRow(["ID_Pago", "ID_Asesor", "Tipo", "Monto", "Mes", "Fecha_Pago"]);
+    }
+    
+    sheet.appendRow([
+      Utilities.getUuid(),
+      payload.asesorId || payload.asesor || "Desconocido",
+      payload.tipo || "COMISION",
+      payload.monto || 0,
+      payload.mes || new Date().toLocaleString('es-MX', {month: 'long', year: 'numeric'}),
+      new Date().toISOString()
+    ]);
+    
+    return createResponse({ success: true });
+  } finally {
+    lock.releaseLock();
   }
 }

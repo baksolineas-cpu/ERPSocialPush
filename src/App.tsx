@@ -9,6 +9,7 @@ import AsesoriaAcompanamientoDashboard from './components/AsesoriaAcompanamiento
 import OperacionesDashboard from './components/OperacionesDashboard';
 import TesoreriaDashboard from './components/TesoreriaDashboard';
 import ContabilidadDashboard from './components/ContabilidadDashboard';
+import CapitalHumanoDashboard from './components/CapitalHumanoDashboard';
 import AdminPanel from './components/AdminPanel';
 import ClientView from './components/ClientView';
 import OnboardingExpress from './components/OnboardingExpress';
@@ -55,6 +56,7 @@ function AppRoutes() {
               <Route path="/operaciones" element={user.role === 'Admin' ? <OperacionesDashboard /> : <Navigate to="/entrevista" />} />
               <Route path="/tesoreria" element={user.role === 'Admin' ? <TesoreriaDashboard /> : <Navigate to="/entrevista" />} />
               <Route path="/contabilidad" element={user.role === 'Admin' ? <ContabilidadDashboard /> : <Navigate to="/entrevista" />} />
+              <Route path="/capital-humano" element={user.role === 'Admin' || user.role === 'Capital Humano' ? <CapitalHumanoDashboard /> : <Navigate to="/entrevista" />} />
               <Route path="/admin" element={user.role === 'Admin' ? <AdminPanel /> : <Navigate to="/entrevista" />} />
               <Route path="/clientes" element={<Clientes />} />
               <Route path="/hojas" element={user.role === 'Admin' ? <HojasDeServicio /> : <Navigate to="/entrevista" />} />

@@ -18,7 +18,11 @@ import { cn } from '@/lib/utils';
 import { callGAS } from '@/services/apiService';
 import { Cliente } from '@/types';
 
+import { useAuth } from './AuthProvider';
+
 export default function AsesoriaAcompanamientoDashboard() {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<'monitor' | 'mi_cartera'>('monitor');
   const [clients, setClients] = useState<Cliente[]>([]);
   const [hojas, setHojas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -128,6 +132,20 @@ export default function AsesoriaAcompanamientoDashboard() {
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mt-1">Centro de Activación y Seguimiento de Consultoría</p>
         </div>
         <div className="flex gap-4">
+          <div className="flex bg-white/5 p-1 rounded-2xl border border-white/10 shadow-2xl mr-4">
+            {(['monitor', 'mi_cartera'] as ('monitor' | 'mi_cartera')[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  activeTab === tab ? "bg-gold text-black shadow-[0_0_20px_rgba(218,165,32,0.3)]" : "text-white/40 hover:text-white"
+                )}
+              >
+                {tab.replace('_', ' ')}
+              </button>
+            ))}
+          </div>
           <button 
             onClick={() => window.open('https://calendar.app.google/xhQAeqCHTCsdgBei6', '_blank')}
             className="bg-gold text-black px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-[0_0_30px_rgba(218,165,32,0.3)] hover:scale-105 transition-all flex items-center gap-3"
@@ -139,9 +157,9 @@ export default function AsesoriaAcompanamientoDashboard() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
         <div className="xl:col-span-2 space-y-8">
-          {/* Monitor de Clientes Activos */}
-          <section className="bg-white/5 rounded-[40px] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-md">
-            <div className="p-8 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          {activeTab === 'monitor' && (
+            <section className="bg-white/5 rounded-[40px] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-md">
+              <div className="p-8 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-gold/10 rounded-2xl flex items-center justify-center text-gold border border-gold/20">
                   <Users size={24} />
@@ -267,6 +285,58 @@ export default function AsesoriaAcompanamientoDashboard() {
               </table>
             </div>
           </section>
+          )}
+
+          {activeTab === 'mi_cartera' && (
+            <section className="bg-white/5 rounded-[40px] border border-white/10 shadow-2xl overflow-hidden backdrop-blur-md">
+              <div className="p-8 border-b border-white/5">
+                <h3 className="text-lg font-black text-white uppercase tracking-tight italic">Mi Cartera y Comisiones</h3>
+                <p className="text-[9px] text-white/30 font-black uppercase tracking-widest">Resumen de expedientes propios</p>
+                {(() => {
+                  const misHojas = hojas.filter(h => h.asesor === user?.name || h.promotor === user?.name);
+                  const comisionProyectada = misHojas.reduce((sum, h) => sum + (parseFloat(h.pago_promotor) || 0), 0);
+                  
+                  return (
+                    <div className="mt-6 flex gap-8">
+                      <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-6">
+                        <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">Comisión Proyectada</p>
+                        <p className="text-3xl font-black text-white mt-1">${Number(comisionProyectada).toLocaleString('es-MX', {minimumFractionDigits:2})}</p>
+                      </div>
+                      <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                        <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest">Clientes Activos</p>
+                        <p className="text-3xl font-black text-white mt-1">{misHojas.length}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-white/5">
+                      <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Cliente</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Servicios</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {hojas.filter(h => h.asesor === user?.name || h.promotor === user?.name).map((h, i) => {
+                      const client = clients.find(c => c.id === h.id_cliente || c.id === h.clienteid);
+                      return (
+                        <tr key={i} className="hover:bg-white/10 transition-colors">
+                          <td className="px-8 py-6 text-sm font-bold text-white">{client?.nombre} {client?.apellidos}</td>
+                          <td className="px-8 py-6 text-[11px] font-black uppercase text-white/60">{h.servicios || h.servicios_u2 || 'S/D'}</td>
+                          <td className="px-8 py-6 text-sm font-black text-gold">${Number(h.monto || h.honorarios || 0).toLocaleString('es-MX')}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
           <input type="file" accept=".pdf,image/*" ref={paymentInputRef} onChange={handlePaymentUpload} className="hidden" />
         </div>
 
