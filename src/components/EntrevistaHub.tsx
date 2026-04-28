@@ -930,9 +930,9 @@ export default function EntrevistaHub() {
                                                 <label className="flex items-center justify-between cursor-pointer">
                                                     <div className="flex items-center gap-3">
                                                         <input type="checkbox" checked={isSelected} onChange={(e) => {
-                                                            const universe = classifyUniverse(srv);
+                                                            const autoUniverso = (srv.toLowerCase().includes('modalidad') || srv.toLowerCase().includes('pti')) ? 'U2' : 'U1';
                                                             const updated = e.target.checked 
-                                                                ? [...hojaServicio.servicios, { nombre: srv, universo: universe, precio: 0 }]
+                                                                ? [...hojaServicio.servicios, { nombre: srv, universo: autoUniverso, precio: 0 }]
                                                                 : hojaServicio.servicios.filter(s => s.nombre !== srv);
                                                             const total = updated.reduce((sum, s) => sum + s.precio, 0);
                                                             const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
@@ -940,7 +940,7 @@ export default function EntrevistaHub() {
                                                         }} className="hidden"/>
                                                         <div className="flex flex-col">
                                                             <span className={cn("text-xs font-bold", isSelected && "text-[#003366]")}>{srv}</span>
-                                                            <span className="text-[9px] font-black uppercase text-slate-400">Universo: {classifyUniverse(srv)}</span>
+                                                            <span className="text-[9px] font-black uppercase text-slate-400">Universo: {(srv.toLowerCase().includes('modalidad') || srv.toLowerCase().includes('pti')) ? 'U2' : 'U1'}</span>
                                                         </div>
                                                     </div>
                                                     {isSelected && <CheckCircle2 size={16} className="text-[#DAA520]" />}
@@ -1001,10 +1001,10 @@ export default function EntrevistaHub() {
                                               value={srv.nombre === 'Otro' ? '' : srv.nombre}
                                               onChange={(e) => {
                                                   const val = e.target.value || 'Otro';
-                                                  const univ = classifyUniverse(val);
+                                                  const autoUniv = (val.toLowerCase().includes('modalidad') || val.toLowerCase().includes('pti')) ? 'U2' : 'U1';
                                                   const updated = [...hojaServicio.servicios];
                                                   updated[idx].nombre = val;
-                                                  updated[idx].universo = univ;
+                                                  updated[idx].universo = autoUniv;
                                                   setHojaServicio({...hojaServicio, servicios: updated});
                                               }}
                                             />

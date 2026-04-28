@@ -26,7 +26,8 @@ export default function ExternalSignature() {
   const [montoTotal, setMontoTotal] = useState<string>("0.00");
   const [error, setError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState(false);
-  const [contractUrl, setContractUrl] = useState(`https://drive.google.com/file/d/1JVxjrR3k7EOwiCG9l8SSGMEvTU4G_PwO3cOWqm0wQpk/preview`);
+  const [contractUrl, setContractUrl] = useState<string | null>(null);
+  const [diagnosticoUrl, setDiagnosticoUrl] = useState<string | null>(null);
 
   const webcamRef = useRef<Webcam>(null);
   const sigPad = useRef<SignatureCanvas>(null);
@@ -41,6 +42,7 @@ export default function ExternalSignature() {
            setClientData(res.data);
            if (res.data.folder_url) setFolderUrl(res.data.folder_url);
            if (res.data.contrato_url) setContractUrl(res.data.contrato_url);
+           if (res.data.diagnostico_url) setDiagnosticoUrl(res.data.diagnostico_url);
            // Hydrate montoTotal state if coming from payload
            if (res.data.montoTotal !== undefined) {
              setMontoTotal(res.data.montoTotal.toString());
@@ -147,7 +149,7 @@ export default function ExternalSignature() {
           ID: {clienteId?.toString().replace("NEW_", "").substring(0, 10).toUpperCase()}
         </div>
       </header>
- 
+
        <main className="flex-1 max-w-4xl mx-auto w-full p-4 md:p-8 space-y-8">
         
         {step === 0 && (
@@ -171,75 +173,90 @@ export default function ExternalSignature() {
                </div>
 
                <div className="space-y-12">
-                 {tipoDoc.includes('CONTRATO') && (
-                   <div className="space-y-6">
-                     <div className="flex items-center gap-3 border-b border-slate-100 pb-4 text-[#DAA520]">
-                        <FileText size={18} />
-                        <h4 className="text-xs font-black uppercase tracking-widest font-bold">I. Contrato Marco de Servicios</h4>
+                   {(tipoDoc.includes('CONTRATO') || (!diagnosticoUrl && !clientData?.diagnosticoTexto)) && contractUrl && (
+                     <div className="space-y-6">
+                       <div className="flex items-center gap-3 border-b border-slate-100 pb-4 text-[#DAA520]">
+                          <FileText size={18} />
+                          <h4 className="text-xs font-black uppercase tracking-widest font-bold">I. Contrato Marco de Servicios</h4>
+                       </div>
+                       <div className="relative group rounded-3xl overflow-hidden border-2 border-slate-100 shadow-inner bg-slate-50">
+                          <iframe 
+                             src={contractUrl.includes('drive.google.com') && !contractUrl.includes('/preview') ? contractUrl.replace('/view', '/preview') : contractUrl} 
+                             className="w-full h-[700px] border-none"
+                             title="Contrato"
+                          />
+                       </div>
                      </div>
-                     <div className="relative group rounded-3xl overflow-hidden border-2 border-slate-100 shadow-inner bg-slate-50">
-                        <iframe 
-                           src={contractUrl.includes('drive.google.com') && !contractUrl.includes('/preview') ? contractUrl.replace('/view', '/preview') : contractUrl} 
-                           className="w-full h-[700px] border-none"
-                           title="Contrato"
-                        />
-                        <div className="absolute inset-0 pointer-events-none border-4 border-emerald-500/0 group-hover:border-emerald-500/5 transition-all" />
+                   )}
+
+                   {diagnosticoUrl ? (
+                     <div className="space-y-6">
+                       <div className="flex items-center gap-3 border-b border-slate-100 pb-4 text-[#DAA520]">
+                          <FileText size={18} />
+                          <h4 className="text-xs font-black uppercase tracking-widest font-bold">II. Diagnóstico Técnico Certificado</h4>
+                       </div>
+                       <div className="relative group rounded-3xl overflow-hidden border-2 border-slate-100 shadow-inner bg-slate-50">
+                          <iframe 
+                             src={diagnosticoUrl.includes('drive.google.com') && !diagnosticoUrl.includes('/preview') ? diagnosticoUrl.replace('/view', '/preview') : diagnosticoUrl} 
+                             className="w-full h-[700px] border-none"
+                             title="Diagnostico"
+                          />
+                       </div>
                      </div>
-                   </div>
-                 )}
+                   ) : (
+                     <div className="space-y-6">
+                       <div className="flex items-center gap-3 border-b border-slate-100 pb-4 text-[#DAA520]">
+                          <FileText size={18} />
+                          <h4 className="text-sm font-black uppercase tracking-widest font-bold font-sans">II. Diagnóstico Inicial Certificado</h4>
+                       </div>
+                       <div className="bg-white p-8 md:p-12 rounded-[40px] border-2 border-slate-100 shadow-xl relative group">
+                          <div className="absolute top-0 left-0 w-3 h-full bg-[#DAA520]" />
+                          <div className="flex justify-between items-start mb-8 border-b border-slate-50 pb-6">
+                            <div className="space-y-1">
+                              <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Dictamen para:</p>
+                              <p className="text-sm font-black text-[#003366] uppercase">{clientData?.nombre} | CURP: {clientData?.curp} | RFC: {clientData?.rfc || '[RFC]'}</p>
+                            </div>
+                            <FileText className="text-slate-100 group-hover:text-slate-200 transition-colors" size={48} />
+                          </div>
+                          <div className="bg-slate-50 p-8 rounded-3xl border border-slate-100 italic text-slate-900 leading-relaxed whitespace-pre-wrap text-sm shadow-inner mb-10 relative overflow-hidden">
+                            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none -rotate-12"><FileText size={80} /></div>
+                            <div className="relative z-10">
+                              {clientData?.diagnosticoTexto || clientData?.hojaservicio?.diagnostico || "Cargando su diagnóstico personalizado..."}
+                            </div>
+                          </div>
 
-                 <div className="space-y-6">
-                   <div className="flex items-center gap-3 border-b border-slate-100 pb-4 text-[#DAA520]">
-                      <FileText size={18} />
-                      <h4 className="text-sm font-black uppercase tracking-widest font-bold font-sans">II. Diagnóstico Inicial Certificado</h4>
-                   </div>
-                   <div className="bg-white p-8 md:p-12 rounded-[40px] border-2 border-slate-100 shadow-xl relative group">
-                      <div className="absolute top-0 left-0 w-3 h-full bg-[#DAA520]" />
-                      <div className="flex justify-between items-start mb-8 border-b border-slate-50 pb-6">
-                        <div className="space-y-1">
-                          <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Dictamen para:</p>
-                          <p className="text-sm font-black text-[#003366] uppercase">{clientData?.nombre} | CURP: {clientData?.curp} | RFC: {clientData?.rfc || '[RFC]'}</p>
-                        </div>
-                        <FileText className="text-slate-100 group-hover:text-slate-200 transition-colors" size={48} />
-                      </div>
-                      <div className="bg-slate-50 p-8 rounded-3xl border border-slate-100 italic text-slate-900 leading-relaxed whitespace-pre-wrap text-sm shadow-inner mb-10 relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none -rotate-12"><FileText size={80} /></div>
-                        <div className="relative z-10">
-                          {clientData?.diagnosticoTexto || clientData?.hojaservicio?.diagnostico || "Cargando su diagnóstico personalizado..."}
-                        </div>
-                      </div>
-
-                      {clientData?.hojaservicio && (
-                        <div className="space-y-6">
-                           <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                             <h5 className="text-[10px] font-black uppercase text-[#003366] mb-3">Resumen de Servicios Contratados</h5>
-                             <p className="text-sm font-bold text-slate-800">{clientData.hojaservicio.servicios || 'No especificado'}</p>
-                             <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center">
-                               <span className="text-[10px] font-bold text-slate-400 uppercase">Monto Total Estimado</span>
-                               <span className="text-xl font-black text-[#DAA520]">${montoTotal}</span>
-                             </div>
-                           </div>
-
-                           {clientData.hojaservicio.asesor && (
-                             <div className="pt-6 border-t border-slate-100 mt-6 grid grid-cols-2">
-                               <div className="space-y-2">
-                                 <p className="text-[10px] font-black uppercase text-slate-400">Asesor a Cargo</p>
-                                 <p className="text-xs font-bold text-[#003366] uppercase">{clientData.hojaservicio.asesor}</p>
+                          {clientData?.hojaservicio && (
+                            <div className="space-y-6">
+                               <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                                 <h5 className="text-[10px] font-black uppercase text-[#003366] mb-3">Resumen de Servicios Contratados</h5>
+                                 <p className="text-sm font-bold text-slate-800">{clientData.hojaservicio.servicios || 'No especificado'}</p>
+                                 <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center">
+                                   <span className="text-[10px] font-bold text-slate-400 uppercase">Monto Total Estimado</span>
+                                   <span className="text-xl font-black text-[#DAA520]">${montoTotal}</span>
+                                 </div>
                                </div>
-                               {clientData.hojaservicio.firmaasesor && (
-                                 <div className="flex flex-col items-end">
-                                   <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Firma del Asesor</p>
-                                   <div className="bg-white border rounded p-2 h-16 w-32 flex items-center justify-center">
-                                      <img src={clientData.hojaservicio.firmaasesor} alt="Firma Asesor" className="max-h-full max-w-full object-contain mix-blend-multiply" />
+
+                               {clientData.hojaservicio.asesor && (
+                                 <div className="pt-6 border-t border-slate-100 mt-6 grid grid-cols-2">
+                                   <div className="space-y-2">
+                                     <p className="text-[10px] font-black uppercase text-slate-400">Asesor a Cargo</p>
+                                     <p className="text-xs font-bold text-[#003366] uppercase">{clientData.hojaservicio.asesor}</p>
                                    </div>
+                                   {clientData.hojaservicio.firmaasesor && (
+                                     <div className="flex flex-col items-end">
+                                       <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Firma del Asesor</p>
+                                       <div className="bg-white border rounded p-2 h-16 w-32 flex items-center justify-center">
+                                          <img src={clientData.hojaservicio.firmaasesor} alt="Firma Asesor" className="max-h-full max-w-full object-contain mix-blend-multiply" />
+                                       </div>
+                                     </div>
+                                   )}
                                  </div>
                                )}
-                             </div>
-                           )}
-                        </div>
-                      )}
-                   </div>
-                 </div>
+                            </div>
+                          )}
+                       </div>
+                     </div>
+                   )}
                </div>
             </div>
 
@@ -248,7 +265,7 @@ export default function ExternalSignature() {
             </button>
           </div>
         )}
- 
+
         {step === 1 && (
           <div className="bg-white p-8 rounded-[40px] shadow-xl border border-slate-100 space-y-6 animate-in fade-in duration-500 text-center">
             <div className="flex items-center gap-2 justify-center mb-4 text-[#DAA520]">
