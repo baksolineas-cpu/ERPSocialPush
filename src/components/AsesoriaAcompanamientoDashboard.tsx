@@ -72,7 +72,6 @@ export default function AsesoriaAcompanamientoDashboard() {
     if (!clientId) return null;
     const idUpper = String(clientId).toUpperCase().trim();
     
-    // Función de seguridad: solo retorna true si es una URL válida
     const isValidUrl = (url: any) => typeof url === 'string' && url.startsWith('http');
 
     // 1. Buscar en HOJAS_SERVICIO
@@ -80,14 +79,26 @@ export default function AsesoriaAcompanamientoDashboard() {
       String(h.id_cliente || h.clienteid || h.idcliente || h.id || '').toUpperCase().trim() === idUpper &&
       (isValidUrl(h.url_diagnostico) || isValidUrl(h.urldiagnostico) || isValidUrl(h.urldiagnóstico) || isValidUrl(h.firmaurl))
     );
-    if (hoja) return hoja.url_diagnostico || hoja.urldiagnostico || hoja.urldiagnóstico || hoja.firmaurl;
+    
+    if (hoja) {
+      if (isValidUrl(hoja.url_diagnostico)) return hoja.url_diagnostico;
+      if (isValidUrl(hoja.urldiagnostico)) return hoja.urldiagnostico;
+      if (isValidUrl(hoja.urldiagnóstico)) return hoja.urldiagnóstico;
+      if (isValidUrl(hoja.firmaurl)) return hoja.firmaurl;
+    }
 
     // 2. Buscar en GESTIONES_U2
     const gestion = gestionesU2.find((g: any) => 
       String(g.clienteid || g.id_cliente || g.idcliente || g.id || '').toUpperCase().trim() === idUpper &&
       (isValidUrl(g.url_diagnostico) || isValidUrl(g.urldiagnostico) || isValidUrl(g.urldiagnóstico) || isValidUrl(g.firmaurl))
     );
-    if (gestion) return gestion.url_diagnostico || gestion.urldiagnostico || gestion.urldiagnóstico || gestion.firmaurl;
+    
+    if (gestion) {
+      if (isValidUrl(gestion.url_diagnostico)) return gestion.url_diagnostico;
+      if (isValidUrl(gestion.urldiagnostico)) return gestion.urldiagnostico;
+      if (isValidUrl(gestion.urldiagnóstico)) return gestion.urldiagnóstico;
+      if (isValidUrl(gestion.firmaurl)) return gestion.firmaurl;
+    }
 
     return null;
   };
