@@ -8,6 +8,8 @@ try {
 }
 
 const ROOT_FOLDER_ID = "1xzILR2Afad-feJ-CHAkNiCHjHwLocvhX"; 
+const CONTRATO_TEMPLATE_ID = "12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0";
+const DIAGNOSTICO_TEMPLATE_ID = "17Q_Z8_r_8_m_8_m_8_m_placeholder"; // REEMPLAZAR CON ID REAL SI EXISTE
 
 function logDebug(tag, message) {
   if (!SPREADSHEET_ID) {
@@ -313,7 +315,7 @@ function handleFinalizeAudit(payload) {
     handleCreateHoja(payload);
   } catch(e) { logDebug("ERR_HOJA_CREATION", e.toString()); }
 
-  // 3. GENERACIÓN DE DOCUMENTOS (Diagnóstico y Contrato Marco)
+  // 3. GENERACIÓN DE DOCUMENTOS (Blindada con try/catch independientes)
   try {
     const clientes = getSheetData("CLIENTES");
     const cliente = clientes.find(c => (c.curp === (payload.curp || searchId) || c.id === searchId));
@@ -323,82 +325,83 @@ function handleFinalizeAudit(payload) {
       if (folderId) {
         const folder = DriveApp.getFolderById(folderId);
         
-        // A. CONTRATO MARCO - Solo si NO existe
-        const existingFiles = folder.getFiles();
-        let hasContrato = false;
-        while (existingFiles.hasNext()) {
-          const f = existingFiles.next();
-          if (f.getName().includes("CONTRATO_MARCO")) {
-            hasContrato = true;
-            break;
+        // --- CLONAR CONTRATO MARCO ---
+        let newDocFile;
+        try {
+          const templateDoc = DriveApp.getFileById(CONTRATO_TEMPLATE_ID);
+          newDocFile = templateDoc.makeCopy("CONTRATO_MARCO_" + searchId, folder);
+          if (newDocFile) {
+            const doc = DocumentApp.openById(newDocFile.getId());
+            const body = doc.getBody();
+            body.replaceText("{{nombre_cliente}}", cliente.nombre || "");
+            body.replaceText("{{NOMBRE_CLIENTE}}", cliente.nombre || "");
+            body.replaceText("{{CURP}}", cliente.curp || "");
+            body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
+            body.replaceText("{{NSS}}", cliente.nss || "");
+            body.replaceText("{{DOMICILIO}}", cliente.domicilio || cliente.domicilioextraido || "");
+            doc.saveAndClose();
           }
-        }
-        
-        if (!hasContrato) {
-          const templateId = "12GVFwA_zkRs4olXQaF2sL5E6Tw6em7ne19tw3y6vHL0";
-          try {
-             const copy = DriveApp.getFileById(templateId).makeCopy('CONTRATO_MARCO_' + (payload.id_hoja || new Date().getTime()) + ' - ' + (cliente.nombre || ''), folder);
-             const doc = DocumentApp.openById(copy.getId());
-             const body = doc.getBody();
-             
-             body.replaceText("{{nombre_cliente}}", cliente.nombre || "");
-             body.replaceText("{{NOMBRE_CLIENTE}}", cliente.nombre || "");
-             body.replaceText("{{CURP}}", cliente.curp || "");
-             body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
-             body.replaceText("{{NSS}}", cliente.nss || "");
-             body.replaceText("{{DOMICILIO}}", cliente.domicilioextraido || "");
-
-             doc.saveAndClose();
-
-          } catch(errC) { logDebug("ERR_CLONE_CONTRATO", errC.toString()); }
+        } catch(e) {
+          logDebug("ERR_CLONE_CONTRATO", e.toString());
         }
 
-        // B. GENERACIÓN DE DIAGNÓSTICO CERTIFICADO
-        // Aportamos el parámetro montoU2 para separar instrucciones.
-        const diagUrl = generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja, payload.montoU2);
-        
-        let finalDiagUrl = diagUrl; // Resguardo de URL
-
-        // C. AUTO-SELLADO (Upsell Logic)
-        let prevFirma = null;
-        let prevSelfie = null;
-        const filesDrive = folder.getFiles();
-        while (filesDrive.hasNext()) {
-          const df = filesDrive.next();
-          const dName = df.getName().toUpperCase();
-          if (dName.includes("FIRMA_CLIENTE")) prevFirma = df.getBlob();
-          if (dName.includes("SELFIE")) prevSelfie = df.getBlob();
+        // --- CLONAR DIAGNOSTICO (O Generar vía Helper) ---
+        let finalDiagUrl = "";
+        try {
+          // Si el usuario proporcionó un ID de plantilla de diagnóstico, clonamos. 
+          // Si no, usamos el generador dinámico que ya teníamos.
+          if (DIAGNOSTICO_TEMPLATE_ID && !DIAGNOSTICO_TEMPLATE_ID.includes("placeholder")) {
+            const diagTemplateDoc = DriveApp.getFileById(DIAGNOSTICO_TEMPLATE_ID);
+            const newDiagFile = diagTemplateDoc.makeCopy("DIAGNOSTICO_CERTIFICADO_" + searchId, folder);
+            if (newDiagFile) finalDiagUrl = newDiagFile.getUrl();
+          } else {
+            finalDiagUrl = generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja, payload.montoU2);
+          }
+        } catch(e) {
+          logDebug("ERR_CLONE_DIAGNOSTICO", e.toString());
         }
 
-        if (prevFirma && prevSelfie && diagUrl) {
-           logDebug("AUTO_SEALING", "Detectado cliente recurrente con firma. Sellando diagnóstico automáticamente.");
-           const diagId = diagUrl.split('/d/')[1].split('/')[0];
-           const docFile = DriveApp.getFileById(diagId);
-           if (docFile.getMimeType() === MimeType.GOOGLE_DOCS) {
-              const doc = DocumentApp.openById(diagId);
-              const body = doc.getBody();
-              const signatureTimestamp = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' });
-              const transactionId = "AUTO-" + Utilities.getUuid().substring(0, 8).toUpperCase();
-              
-              body.replaceText("{{FECHA_FIRMA}}", signatureTimestamp);
-              body.replaceText("{{ID_TRANSACCION}}", transactionId);
-              
-              replaceTextWithImageBlob(body, "{{firma_cliente}}", prevFirma, 220, 110);
-              replaceTextWithImageBlob(body, "{{selfie}}", prevSelfie, 140, 140);
-              
-              doc.saveAndClose();
-              Utilities.sleep(3000);
-              
-              // Export PDF
-              const pdfBlob = docFile.getAs('application/pdf');
-              const pdfFile = folder.createFile(pdfBlob).setName(docFile.getName() + "_AUTO_FIRMADO_" + transactionId + ".pdf");
-              pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-              
-              // Aquí salvamos la URL real y eliminamos el temporal
-              finalDiagUrl = pdfFile.getUrl();
-              docFile.setTrashed(true);
-              logDebug("AUTO_SEALING_COMPLETE", "Diagnóstico sellado con éxito: " + pdfFile.getUrl());
-           }
+        // C. AUTO-SELLADO (Upsell Logic) - Solo si tenemos URL de documento
+        if (finalDiagUrl) {
+          let prevFirma = null;
+          let prevSelfie = null;
+          const filesDrive = folder.getFiles();
+          while (filesDrive.hasNext()) {
+            const df = filesDrive.next();
+            const dName = df.getName().toUpperCase();
+            if (dName.includes("FIRMA_CLIENTE")) prevFirma = df.getBlob();
+            if (dName.includes("SELFIE")) prevSelfie = df.getBlob();
+          }
+
+          if (prevFirma && prevSelfie && finalDiagUrl.includes("/d/")) {
+             logDebug("AUTO_SEALING", "Detectado cliente recurrente con firma. Sellando diagnóstico automáticamente.");
+             const diagId = finalDiagUrl.split('/d/')[1].split('/')[0];
+             const docFile = DriveApp.getFileById(diagId);
+             if (docFile.getMimeType() === MimeType.GOOGLE_DOCS) {
+                const doc = DocumentApp.openById(diagId);
+                const body = doc.getBody();
+                const signatureTimestamp = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' });
+                const transactionId = "AUTO-" + Utilities.getUuid().substring(0, 8).toUpperCase();
+                
+                body.replaceText("{{FECHA_FIRMA}}", signatureTimestamp);
+                body.replaceText("{{ID_TRANSACCION}}", transactionId);
+                
+                replaceTextWithImageBlob(body, "{{firma_cliente}}", prevFirma, 220, 110);
+                replaceTextWithImageBlob(body, "{{selfie}}", prevSelfie, 140, 140);
+                
+                doc.saveAndClose();
+                Utilities.sleep(3000);
+                
+                // Export PDF
+                const pdfBlob = docFile.getAs('application/pdf');
+                const pdfFile = folder.createFile(pdfBlob).setName(docFile.getName() + "_AUTO_FIRMADO_" + transactionId + ".pdf");
+                pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+                
+                finalDiagUrl = pdfFile.getUrl();
+                docFile.setTrashed(true);
+                logDebug("AUTO_SEALING_COMPLETE", "Diagnóstico sellado con éxito: " + pdfFile.getUrl());
+             }
+          }
         }
         
         // D. PERSISTENCIA DE LA URL DEL DIAGNÓSTICO
@@ -695,7 +698,7 @@ function handleCreateCliente(payload) {
       }
     }
 
-    const curp10 = payload.curp ? payload.curp.toString().substring(0, 10).toUpperCase() : (payload.id || "");
+    const curp10 = payload.curp ? payload.curp.toString().substring(0, 10).toUpperCase() : (payload.id || "").toString().replace("NEW_", "");
     // 2. RECUPERAR DATOS PREVIOS PARA NO SOBREESCRIBIR CON VACÍOS (MERGE)
     let rowData = [];
     if (existingRowIndex > -1) {
@@ -709,7 +712,7 @@ function handleCreateCliente(payload) {
     // 3. ACTUALIZACIÓN SELECTIVA (Solo si el payload trae el dato)
     const mapUpdate = (index, value) => { if (value !== undefined && value !== null) rowData[index] = value; };
 
-    mapUpdate(0, curp10);                                       // A: id
+    mapUpdate(idCol !== -1 ? idCol : 0, curp10);               // A: id (Forzamos realId)
     mapUpdate(1, payload.nombre);                              // B: Nombre
     mapUpdate(2, "");                                          // C: Apellidos (Mantenemos columna vacía para no desplazar)
     mapUpdate(3, payload.curp);                                // D: CURP
