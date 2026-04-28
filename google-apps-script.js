@@ -643,7 +643,7 @@ function handleCreateCliente(payload) {
 
     mapUpdate(0, curp10);                                       // A: id
     mapUpdate(1, payload.nombre);                              // B: Nombre
-    mapUpdate(2, payload.apellidos);                           // C: Apellidos
+    mapUpdate(2, "");                                          // C: Apellidos (Mantenemos columna vacía para no desplazar)
     mapUpdate(3, payload.curp);                                // D: CURP
     
     // NSS Handling: Prefer list if it has elements, else fallback to single nss
@@ -698,7 +698,7 @@ function handleCreateCliente(payload) {
       try {
         const folder = DriveApp.getFolderById(folderId);
         if (folder.getName().includes("NUEVO")) {
-          folder.setName(`[${curp10}] ${payload.nombre} ${payload.apellidos || ""}`.trim());
+          folder.setName(`[${curp10}] ${payload.nombre}`.trim());
         }
       } catch(e) {}
     }

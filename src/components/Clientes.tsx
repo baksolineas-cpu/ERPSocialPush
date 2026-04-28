@@ -69,7 +69,6 @@ export default function Clientes() {
       const payload = {
         id,
         nombre: formData.get('nombre') as string,
-        apellidos: formData.get('apellidos') as string,
         curp,
         nss: formData.get('nss') as string,
         rfc: formData.get('rfc') as string,
@@ -96,7 +95,6 @@ export default function Clientes() {
 
   const filteredClientes = clientes.filter(c => 
     c.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.apellidos.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.curp.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.nss.includes(searchTerm)
   );
@@ -158,7 +156,7 @@ export default function Clientes() {
               </div>
             </div>
             <div className="p-4">
-              <h4 className="font-bold text-slate-900 truncate">{cliente.nombre} {cliente.apellidos}</h4>
+              <h4 className="font-bold text-slate-900 truncate">{cliente.nombre}</h4>
               <p className="text-xs text-slate-500 mb-4 font-mono">{cliente.curp}</p>
               
               <div className="grid grid-cols-2 gap-2">
@@ -200,15 +198,13 @@ export default function Clientes() {
             </div>
             
             <form onSubmit={handleRegister} className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase">Nombre(s)</label>
+                  <label className="text-xs font-bold text-slate-500 uppercase">Nombre Completo</label>
                   <input name="nombre" required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase">Apellidos</label>
-                  <input name="apellidos" required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all" />
-                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-500 uppercase">CURP Completa</label>
                   <input name="curp" required maxLength={18} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono" />

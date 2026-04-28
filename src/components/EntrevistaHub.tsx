@@ -372,7 +372,7 @@ export default function EntrevistaHub() {
       
       // Filtrado optimizado: break temprano si no matchea
       setFoundClients(list.filter((c: any) => {
-        const full = normalize(`${c.nombre || ''} ${c.apellidos || ''}`);
+        const full = normalize(`${c.nombre || ''}`);
         return queryTokens.every(token => full.includes(token));
       }));
     } catch (e) {
@@ -1285,7 +1285,7 @@ export default function EntrevistaHub() {
                     </div>
                 </div>
 
-                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Nombre del Cliente" value={data.nombre} fieldKey="nombre" isLocked={lockedFields.has('nombre')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nombre'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nombre} onChange={(v:any)=>updateData({nombre:v})} />
+                <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="Nombre Completo" value={data.nombre} fieldKey="nombre" isLocked={lockedFields.has('nombre')} onUnlock={() => { const s = new Set(lockedFields); s.delete('nombre'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.nombre} onChange={(v:any)=>updateData({nombre:v})} />
                 <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="CURP" value={data.curp} fieldKey="curp" isLocked={lockedFields.has('curp')} onUnlock={() => { const s = new Set(lockedFields); s.delete('curp'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.curp} hasAlert={data.curp && !VALIDATORS.CURP(data.curp)} onChange={(v:any)=>updateData({curp:v.toUpperCase()})} />
                 <AuditoriaInput onBlur={handleAutoSave} registrarAccion={registrarAccion} label="RFC" value={data.rfc} fieldKey="rfc" isLocked={lockedFields.has('rfc')} onUnlock={() => { const s = new Set(lockedFields); s.delete('rfc'); setLockedFields(s); }} isLoading={analyzingCount > 0 && !data.rfc} hasAlert={data.rfc && !VALIDATORS.RFC(data.rfc)} onChange={(v:any)=>updateData({rfc:v.toUpperCase()})} />
                 

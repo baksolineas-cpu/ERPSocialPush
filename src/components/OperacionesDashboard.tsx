@@ -193,7 +193,7 @@ export default function OperacionesDashboard() {
   };
 
   const filteredClients = clients.filter(c => {
-    const matchesSearch = (c.nombre + ' ' + c.apellidos).toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const matchesSearch = (c.nombre || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
                           c.id?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesPromotor = promotorFilter ? c.promotor === promotorFilter : true;
     return matchesSearch && matchesPromotor;
@@ -393,14 +393,26 @@ export default function OperacionesDashboard() {
              fieldsToSync.forEach(field => {
                 let val = (extracted as any)[field === 'cp' ? 'codigoPostal' : field];
                 
-                // Limpieza adicional para montos
-                if (field === 'ultimoSalario' && typeof val === 'string') {
-                  val = parseFloat(val.replace(/[$,\s]/g, '')) || 0;
+                // Limpieza agresiva y técnica según directiva de Operaciones
+                if (field === 'ultimoSalario' && val !== null) {
+                  const cleanedVal = String(val).replace(/[^0-9.]/g, '');
+                  val = parseFloat(cleanedVal) || 0;
+                }
+                if (field === 'semanasCotizadas' && val !== null) {
+                  const cleanedVal = String(val).replace(/[^0-9]/g, '');
+                  val = Math.floor(parseInt(cleanedVal)) || 0;
                 }
 
-                if (val && !mergedData[field as keyof typeof mergedData]) {
+                // Merge Inteligente: Solo actualiza si Gemini encontró el dato (no nulo)
+                if (val !== null && val !== "" && val !== 0 && !mergedData[field as keyof typeof mergedData]) {
                    (mergedData as any)[field] = val;
                    newAiFields.add(field);
+                } else if (val !== null && val !== "" && val !== 0) {
+                   // Si ya tiene valor, pero Gemini trae algo nuevo, priorizamos si el anterior era nulo o vacío
+                   if (!(mergedData as any)[field]) {
+                      (mergedData as any)[field] = val;
+                      newAiFields.add(field);
+                   }
                 }
              });
           }
@@ -459,12 +471,12 @@ export default function OperacionesDashboard() {
     const term = concepto.toUpperCase();
     // Intenta buscar por ID o Nombre
     const match = clients.find(c => {
-      const full = (c.apellidos + ' ' + c.nombre).toUpperCase();
+      const full = (c.nombre || '').toUpperCase();
       const idMatch = c.id && term.includes(c.id.toUpperCase());
-      const nameMatch = term.includes(c.nombre.toUpperCase()) || term.includes(c.apellidos.toUpperCase());
+      const nameMatch = term.includes((c.nombre || '').toUpperCase());
       return idMatch || nameMatch;
     });
-    return match ? `${match.nombre} ${match.apellidos}` : 'No Identificado';
+    return match ? `${match.nombre}` : 'No Identificado';
   };
 
   const getClientUniverso = (clientId: string) => {
@@ -608,7 +620,7 @@ export default function OperacionesDashboard() {
                         <tr key={client.id} className="hover:bg-white/10 transition-colors group">
                           <td className="px-8 py-6">
                             <div className="flex flex-col">
-                              <span className="text-xs font-black text-white tracking-widest uppercase">{client.nombre} {client.apellidos}</span>
+                              <span className="text-xs font-black text-white tracking-widest uppercase">{client.nombre}</span>
                               <span className="text-[9px] font-bold text-gold/60 mt-0.5 tracking-widest">ID: {client.id}</span>
                             </div>
                           </td>
@@ -1115,7 +1127,7 @@ export default function OperacionesDashboard() {
                         <Loader2 className="absolute inset-0 m-auto text-gold animate-pulse" size={32} />
                       </div>
                       <div className="text-center">
-                        <p className="text-lg font-black text-white uppercase tracking-widest animate-pulse">Gemini está analizando los documentos...</p>
+                        <p className="text-lg font-black text-white uppercase tracking-widest animate-pulse">Reini está analizando los documentos...</p>
                         <p className="text-xs text-gold font-bold uppercase tracking-widest mt-2">Estamos pre-llenando el expediente por ti</p>
                       </div>
                     </div>
@@ -1277,7 +1289,6 @@ export default function OperacionesDashboard() {
                             onChange={(e) => setMigrationData({ ...migrationData, origen: e.target.value })}
                             className="w-full px-5 py-3.5 bg-[#1C222D] border border-white/10 rounded-2xl outline-none text-xs font-bold text-white uppercase appearance-none"
                            >
-                             <option value="Socio">Socio</option>
                              <option value="Migración">Migración</option>
                              <option value="Externo">Externo</option>
                            </select>

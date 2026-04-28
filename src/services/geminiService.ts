@@ -29,26 +29,13 @@ export async function extractDocumentData(base64Image: string, mimeType: string,
   if (!ai) throw new Error('CONFIG_ERROR: GEMINI_API_KEY no configurada');
   const cleanBase64 = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
   
-  let promptText = `Actúa como un extractor de datos oficial de México. Analiza este documento (${docType}) y extrae la información en un objeto JSON puro.
+  let promptText = `Extrae los siguientes datos en formato JSON puro: {nombre, curp, rfc, nss, semanasCotizadas, ultimoSalario}.
+
+  Para 'semanasCotizadas', busca números enteros cerca de 'Semanas Reconocidas' o 'Semanas para trámite de pensión'.
+  Para 'ultimoSalario', busca montos decimales cerca de 'SBC' o 'Salario Base de Cotización'.
+  Para 'nss', busca el patrón de 11 dígitos.
   
-  PRIORIDAD TÉCNICA:
-  - Si el documento es una "Constancia de Semanas Cotizadas" o "Estado de Cuenta AFORE", busca agresivamente el NSS y el historial de aportaciones.
-  - El "nss" (Número de Seguridad Social) siempre tiene 11 dígitos.
-  - "semanasCotizadas" suele aparecer como "Semanas Reconocidas" o "Semanas para trámite de pensión".
-  - "ultimoSalario" puede aparecer como "SBC", "Salario Base de Cotización" o "Último Salario".
-
-  Usa EXACTAMENTE estas claves, si el dato no está presente asigna un string vacío "":
-  - "nombre": Nombre COMPLETO de la persona (incluyendo apellidos).
-  - "curp": CURP (18 caracteres).
-  - "rfc": RFC con homoclave (13 caracteres).
-  - "nss": Número de Seguridad Social (11 dígitos).
-  - "semanasCotizadas": Número de semanas reconocidas.
-  - "ultimoSalario": Salario base de cotización o diario (Límpialo de símbolos como $ o comas).
-  - "regimenFiscal": Régimen fiscal o tipo de contribuyente.
-  - "domicilio": Domicilio completo o dirección.
-  - "patrones": Lista de los últimos patrones o razones sociales.
-
-  No inventes datos. Devuelve SOLO el bloque JSON validado.`;
+  Si un dato no está presente en este documento específico, devuelve NULL para ese campo, NO devuelvas strings vacíos ni ceros.`;
   
   if (docType === 'COMPLEMENTARIO') {
       promptText = `Analiza este documento complementario de Seguridad Social (México). 
@@ -97,18 +84,18 @@ export async function extractDocumentData(base64Image: string, mimeType: string,
   const cleanNum = (v: any) => String(v || '').replace(/[^0-9]/g, '');
 
   return {
-    nombre: String(parsed.nombre || '').trim().replace(/[\n\r]/g, ' '),
-    curp: String(parsed.curp || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, ''),
-    rfc: String(parsed.rfc || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, ''),
-    nss: cleanNum(parsed.nss),
-    semanasCotizadas: parseInt(cleanNum(parsed.semanasCotizadas)) || 0,
-    ultimoSalario: parseFloat(String(parsed.ultimoSalario || 0).replace(/[^0-9.]/g, '')) || 0,
-    regimenFiscal: String(parsed.regimenFiscal || '').trim(),
-    domicilio: String(parsed.domicilio || '').trim().replace(/[\n\r]/g, ' '),
-    codigoPostal: cleanNum(parsed.codigoPostal || parsed.cp).substring(0, 5) || '',
+    nombre: parsed.nombre ? String(parsed.nombre).trim().replace(/[\n\r]/g, ' ') : null,
+    curp: parsed.curp ? String(parsed.curp).trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : null,
+    rfc: parsed.rfc ? String(parsed.rfc).trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : null,
+    nss: parsed.nss ? cleanNum(parsed.nss) : null,
+    semanasCotizadas: parsed.semanasCotizadas !== null ? (parseInt(cleanNum(parsed.semanasCotizadas)) || 0) : null,
+    ultimoSalario: parsed.ultimoSalario !== null ? (parseFloat(String(parsed.ultimoSalario).replace(/[^0-9.]/g, '')) || 0) : null,
+    regimenFiscal: parsed.regimenFiscal ? String(parsed.regimenFiscal).trim() : null,
+    domicilio: parsed.domicilio ? String(parsed.domicilio).trim().replace(/[\n\r]/g, ' ') : null,
+    codigoPostal: (parsed.codigoPostal || parsed.cp) ? cleanNum(parsed.codigoPostal || parsed.cp).substring(0, 5) : null,
     tipo_complemento: parsed.tipo_complemento || 'Ninguno',
     semanas_extra: parseInt(cleanNum(parsed.semanas_extra)) || 0,
-    patrones: String(parsed.patrones || '').trim()
+    patrones: parsed.patrones ? String(parsed.patrones).trim() : null
   };
 }
 
