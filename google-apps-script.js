@@ -318,109 +318,126 @@ function handleFinalizeAudit(payload) {
   // 3. GENERACIÓN DE DOCUMENTOS (Blindada con try/catch independientes)
   try {
     const clientes = getSheetData("CLIENTES");
-    const cliente = clientes.find(c => (c.curp === (payload.curp || searchId) || c.id === searchId));
+    const cliente = clientes.find(c => (c.curp === (payload.curp || searchId) || c.id === (payload.id || searchId)));
     
     if (cliente) {
       const folderId = cliente.id_carpeta_drive || cliente.idcarpetadrive;
       if (folderId) {
         const folder = DriveApp.getFolderById(folderId);
+        let finalContratoUrl = "";
+        let finalDiagUrl = "";
         
         // --- CLONAR CONTRATO MARCO ---
-        let newDocFile;
-        try {
-          const templateDoc = DriveApp.getFileById(CONTRATO_TEMPLATE_ID);
-          newDocFile = templateDoc.makeCopy("CONTRATO_MARCO_" + searchId, folder);
-          if (newDocFile) {
-            const doc = DocumentApp.openById(newDocFile.getId());
-            const body = doc.getBody();
-            body.replaceText("{{nombre_cliente}}", cliente.nombre || "");
-            body.replaceText("{{NOMBRE_CLIENTE}}", cliente.nombre || "");
-            body.replaceText("{{CURP}}", cliente.curp || "");
-            body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
-            body.replaceText("{{NSS}}", cliente.nss || "");
-            body.replaceText("{{DOMICILIO}}", cliente.domicilio || cliente.domicilioextraido || "");
-            doc.saveAndClose();
+        if (payload.tipoDocEval && payload.tipoDocEval.includes('CONTRATO')) {
+          try {
+            const templateDoc = DriveApp.getFileById(CONTRATO_TEMPLATE_ID);
+            const newDocFile = templateDoc.makeCopy("CONTRATO_MARCO_" + searchId, folder);
+            if (newDocFile) {
+              const doc = DocumentApp.openById(newDocFile.getId());
+              const body = doc.getBody();
+              body.replaceText("{{nombre_cliente}}", cliente.nombre || "");
+              body.replaceText("{{NOMBRE_CLIENTE}}", cliente.nombre || "");
+              body.replaceText("{{CURP}}", cliente.curp || "");
+              body.replaceText("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
+              body.replaceText("{{NSS}}", cliente.nss || "");
+              body.replaceText("{{DOMICILIO}}", cliente.domicilio || cliente.domicilioextraido || "");
+              
+              replaceTextWithImage(body, "{{firma_cliente}}", payload.firmaBase64, "image/png", 220, 110);
+              replaceTextWithImage(body, "{{selfie}}", payload.selfieBase64, "image/jpeg", 140, 140);
+              replaceTextWithImage(body, "{{IMAGEN_FIRMA}}", payload.firmaBase64, "image/png", 200, 100);
+              replaceTextWithImage(body, "{{IMAGEN_SELFIE}}", payload.selfieBase64, "image/jpeg", 150, 150);
+              
+              doc.saveAndClose();
+              Utilities.sleep(2000);
+              const pdfFile = folder.createFile(newDocFile.getAs('application/pdf')).setName(`CONTRATO_MARCO_${searchId}.pdf`);
+              pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+              finalContratoUrl = pdfFile.getUrl();
+              newDocFile.setTrashed(true);
+            }
+          } catch(e) {
+            logDebug("ERR_CLONE_CONTRATO", e.toString());
           }
-        } catch(e) {
-          logDebug("ERR_CLONE_CONTRATO", e.toString());
         }
 
-        // --- CLONAR DIAGNOSTICO (O Generar vía Helper) ---
-        let finalDiagUrl = "";
+        // --- CLONAR/GENERAR DIAGNOSTICO ---
         try {
-          // Si el usuario proporcionó un ID de plantilla de diagnóstico, clonamos. 
-          // Si no, usamos el generador dinámico que ya teníamos.
           if (DIAGNOSTICO_TEMPLATE_ID && !DIAGNOSTICO_TEMPLATE_ID.includes("placeholder")) {
             const diagTemplateDoc = DriveApp.getFileById(DIAGNOSTICO_TEMPLATE_ID);
             const newDiagFile = diagTemplateDoc.makeCopy("DIAGNOSTICO_CERTIFICADO_" + searchId, folder);
             if (newDiagFile) finalDiagUrl = newDiagFile.getUrl();
           } else {
-            finalDiagUrl = generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja, payload.montoU2);
+             finalDiagUrl = generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja, payload.montoU2);
           }
         } catch(e) {
           logDebug("ERR_CLONE_DIAGNOSTICO", e.toString());
         }
 
-        // C. AUTO-SELLADO (Upsell Logic) - Solo si tenemos URL de documento
-        if (finalDiagUrl) {
-          let prevFirma = null;
-          let prevSelfie = null;
-          const filesDrive = folder.getFiles();
-          while (filesDrive.hasNext()) {
-            const df = filesDrive.next();
-            const dName = df.getName().toUpperCase();
-            if (dName.includes("FIRMA_CLIENTE")) prevFirma = df.getBlob();
-            if (dName.includes("SELFIE")) prevSelfie = df.getBlob();
-          }
+        // C. AUTO-SELLADO (Solo si tenemos URL de documento y es recurrente)
+        if (finalDiagUrl && (payload.tipoDocEval === 'DIAGNOSTICO' || !payload.tipoDocEval)) {
+          try {
+            let prevFirma = null;
+            let prevSelfie = null;
+            const filesDrive = folder.getFiles();
+            while (filesDrive.hasNext()) {
+              const df = filesDrive.next();
+              const dName = df.getName().toUpperCase();
+              if (dName.includes("FIRMA_ONB") || dName.includes("FIRMA_CLIENTE")) prevFirma = df.getBlob();
+              if (dName.includes("SELFIE")) prevSelfie = df.getBlob();
+            }
 
-          if (prevFirma && prevSelfie && finalDiagUrl.includes("/d/")) {
-             logDebug("AUTO_SEALING", "Detectado cliente recurrente con firma. Sellando diagnóstico automáticamente.");
-             const diagId = finalDiagUrl.split('/d/')[1].split('/')[0];
-             const docFile = DriveApp.getFileById(diagId);
-             if (docFile.getMimeType() === MimeType.GOOGLE_DOCS) {
-                const doc = DocumentApp.openById(diagId);
-                const body = doc.getBody();
-                const signatureTimestamp = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' });
-                const transactionId = "AUTO-" + Utilities.getUuid().substring(0, 8).toUpperCase();
-                
-                body.replaceText("{{FECHA_FIRMA}}", signatureTimestamp);
-                body.replaceText("{{ID_TRANSACCION}}", transactionId);
-                
-                replaceTextWithImageBlob(body, "{{firma_cliente}}", prevFirma, 220, 110);
-                replaceTextWithImageBlob(body, "{{selfie}}", prevSelfie, 140, 140);
-                
-                doc.saveAndClose();
-                Utilities.sleep(3000);
-                
-                // Export PDF
-                const pdfBlob = docFile.getAs('application/pdf');
-                const pdfFile = folder.createFile(pdfBlob).setName(docFile.getName() + "_AUTO_FIRMADO_" + transactionId + ".pdf");
-                pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-                
-                finalDiagUrl = pdfFile.getUrl();
-                docFile.setTrashed(true);
-                logDebug("AUTO_SEALING_COMPLETE", "Diagnóstico sellado con éxito: " + pdfFile.getUrl());
-             }
-          }
+            if (prevFirma && prevSelfie && finalDiagUrl.includes("/d/")) {
+               const diagId = finalDiagUrl.split('/d/')[1].split('/')[0];
+               const docFile = DriveApp.getFileById(diagId);
+               if (docFile.getMimeType() === MimeType.GOOGLE_DOCS) {
+                  const doc = DocumentApp.openById(diagId);
+                  const body = doc.getBody();
+                  body.replaceText("{{FECHA_FIRMA}}", new Date().toLocaleString('es-MX'));
+                  body.replaceText("{{ID_TRANSACCION}}", "AUTO-" + Utilities.getUuid().substring(0, 8).toUpperCase());
+                  replaceTextWithImageBlob(body, "{{firma_cliente}}", prevFirma, 220, 110);
+                  replaceTextWithImageBlob(body, "{{selfie}}", prevSelfie, 140, 140);
+                  doc.saveAndClose();
+                  Utilities.sleep(3000);
+                  const pdfBlob = docFile.getAs('application/pdf');
+                  const pdfFile = folder.createFile(pdfBlob).setName(docFile.getName() + "_FIRMADO.pdf");
+                  pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+                  finalDiagUrl = pdfFile.getUrl();
+                  docFile.setTrashed(true);
+               }
+            }
+          } catch(e) { logDebug("ERR_AUTO_SEALING", e.toString()); }
         }
         
-        // D. PERSISTENCIA DE LA URL DEL DIAGNÓSTICO
+        // D. PERSISTENCIA EN CLIENTES Y HOJAS
+        const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+        const sheetClientes = ss.getSheetByName("CLIENTES");
+        if (sheetClientes) {
+          const cDataArr = sheetClientes.getDataRange().getValues();
+          const cHeadersArr = cDataArr[0].map(h => h.toString().toLowerCase().trim());
+          const cidColIdx = cHeadersArr.indexOf("id");
+          const cContratoIdx = cHeadersArr.indexOf("contrato_url");
+          const cDiagIdx = cHeadersArr.indexOf("url_diagnostico");
+          const audColIdx = cHeadersArr.indexOf("estadoauditoria") !== -1 ? cHeadersArr.indexOf("estadoauditoria") : cHeadersArr.indexOf("estado auditoría");
+
+          for (let i = 1; i < cDataArr.length; i++) {
+            const rowIdVal = cDataArr[i][cidColIdx] ? cDataArr[i][cidColIdx].toString().toUpperCase().trim() : "";
+            if (rowIdVal === searchId.toUpperCase().trim()) {
+              if (finalContratoUrl && cContratoIdx !== -1) sheetClientes.getRange(i+1, cContratoIdx + 1).setValue(finalContratoUrl);
+              if (finalDiagUrl && cDiagIdx !== -1) sheetClientes.getRange(i+1, cDiagIdx + 1).setValue(finalDiagUrl);
+              if (audColIdx !== -1) sheetClientes.getRange(i+1, audColIdx + 1).setValue("AUDITORIA_FINALIZADA");
+              break;
+            }
+          }
+        }
+
         if (finalDiagUrl && payload.id_hoja) {
           const isU2 = payload.universo === 'U2' || (payload.serviciosU2 && payload.montoU2 > 0);
-          const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
           let sheetH = ss.getSheetByName(isU2 ? "GESTIONES_U2" : "HOJAS_SERVICIO");
           if (sheetH) {
             const dH = sheetH.getDataRange().getValues(); 
             const headersH = dH[0].map(h => h.toString().toLowerCase().trim());
             const idCol = headersH.indexOf("id_hoja") !== -1 ? headersH.indexOf("id_hoja") : headersH.indexOf("id");
-            
             let uCol = headersH.indexOf("url_diagnostico");
-            if (uCol === -1) uCol = headersH.indexOf("firmaurl"); // Fallback a columna vieja
-            if (uCol === -1) { 
-              uCol = headersH.length; 
-              sheetH.getRange(1, uCol + 1).setValue("URL_Diagnostico"); 
-            }
-            
+            if (uCol === -1) uCol = headersH.indexOf("firmaurl");
             for (let i = 1; i < dH.length; i++) { 
               if (dH[i][idCol] && dH[i][idCol].toString().toUpperCase().trim() === payload.id_hoja.toString().toUpperCase().trim()) { 
                 sheetH.getRange(i + 1, uCol + 1).setValue(finalDiagUrl); 
@@ -432,25 +449,6 @@ function handleFinalizeAudit(payload) {
       }
     }
   } catch(e) { logDebug("ERR_DOC_GEN_MAIN", e.toString()); }
-
-  // --- ACTUALIZAR ESTATUS DE AUDITORIA A FINALIZADA ---
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheetClientes = ss.getSheetByName("CLIENTES");
-    const dataClientes = sheetClientes.getDataRange().getValues();
-    const headersClientes = dataClientes[0].map(h => h.toString().toLowerCase().trim());
-    const audCol = headersClientes.indexOf("estadoauditoria") !== -1 ? headersClientes.indexOf("estadoauditoria") : headersClientes.indexOf("estado auditoría");
-    const idCol = headersClientes.indexOf("id");
-    
-    for (let i = 1; i < dataClientes.length; i++) {
-      if (dataClientes[i][idCol] && dataClientes[i][idCol].toString().toUpperCase().trim() === searchId.toString().toUpperCase().trim()) {
-        if (audCol !== -1) {
-          sheetClientes.getRange(i + 1, audCol + 1).setValue("AUDITORIA_FINALIZADA");
-        }
-        break;
-      }
-    }
-  } catch(e) {}
 
   return createResponse({ success: true });
 }
@@ -933,25 +931,21 @@ function handleCreateHoja(payload) {
       if (idx !== -1) rowData[idx] = val;
     };
 
-    // PARTE 1: HOJAS_SERVICIO (Para U1 puro o Master Record)
-    let serviciosU1Str = "";
-    let montoU1 = montoTotal;
-
-    if (payload.serviciosU2 && payload.montoU2 > 0) {
-       montoU1 = montoTotal - parseFloat(payload.montoU2 || 0);
-       serviciosU1Str = Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || "");
-    } else {
-       serviciosU1Str = Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || "");
-    }
+    // PARTE 1: HOJAS_SERVICIO (UPSERT por ClienteID y Universo)
+    let serviciosU1Str = payload.serviciosU1 || (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || ""));
+    let montoU1 = parseFloat(payload.montoU1 || payload.monto || 0);
 
     const sheetU1Obj = getOrInitSheet("HOJAS_SERVICIO", false);
-    let idHojaCol = sheetU1Obj.headers.indexOf("id_hoja");
-    if (idHojaCol === -1) idHojaCol = sheetU1Obj.headers.indexOf("id");
-    if (idHojaCol === -1) idHojaCol = 0;
+    const cIdColHoja = sheetU1Obj.headers.indexOf("id_cliente");
+    const univColHoja = sheetU1Obj.headers.indexOf("universo");
 
     let rowIndexU1 = -1;
     for (let i = 1; i < sheetU1Obj.data.length; i++) {
-      if (sheetU1Obj.data[i][idHojaCol] && sheetU1Obj.data[i][idHojaCol].toString().toUpperCase().trim() === searchHojaId) {
+      const rowCid = sheetU1Obj.data[i][cIdColHoja] ? sheetU1Obj.data[i][cIdColHoja].toString().toUpperCase().trim() : "";
+      const rowUniv = sheetU1Obj.data[i][univColHoja] ? sheetU1Obj.data[i][univColHoja].toString().toUpperCase().trim() : "";
+      const targetUniv = payload.universo || (hasU2 ? "U1/U2" : "U1");
+      
+      if (rowCid === searchClienteId && rowUniv === targetUniv.toUpperCase()) {
         rowIndexU1 = i; break;
       }
     }
@@ -959,7 +953,7 @@ function handleCreateHoja(payload) {
     const rowDataU1 = rowIndexU1 > -1 ? [...sheetU1Obj.data[rowIndexU1]] : new Array(sheetU1Obj.headers.length).fill("");
     while(rowDataU1.length < sheetU1Obj.headers.length) rowDataU1.push("");
 
-    mapVal(sheetU1Obj.headers, rowDataU1, "id_hoja", searchHojaId);
+    mapVal(sheetU1Obj.headers, rowDataU1, "id_hoja", rowIndexU1 > -1 ? rowDataU1[sheetU1Obj.headers.indexOf("id_hoja")] : searchHojaId);
     mapVal(sheetU1Obj.headers, rowDataU1, "id_cliente", searchClienteId);
     mapVal(sheetU1Obj.headers, rowDataU1, "universo", payload.universo || (hasU2 ? "U1/U2" : "U1"));
     mapVal(sheetU1Obj.headers, rowDataU1, "servicios", serviciosU1Str);
@@ -983,15 +977,18 @@ function handleCreateHoja(payload) {
     else sheetU1Obj.sheet.appendRow(rowDataU1);
 
 
-    // PARTE 2: GESTIONES_U2 (Pagos recurrentes IMSS + Honorarios)
+    // PARTE 2: GESTIONES_U2 (UPSERT por ClienteID y Mes)
     if (hasU2) {
       const sheetU2Obj = getOrInitSheet("GESTIONES_U2", true);
-      let idColU2 = sheetU2Obj.headers.indexOf("id");
-      if (idColU2 === -1) idColU2 = 0;
+      const clienteIdColU2 = sheetU2Obj.headers.indexOf("clienteid");
+      const mesColU2 = sheetU2Obj.headers.indexOf("mes");
+      const currentMonth = new Date().toLocaleString('es-MX', {month: 'long', year: 'numeric'});
 
       let rowIndexU2 = -1;
       for (let i = 1; i < sheetU2Obj.data.length; i++) {
-        if (sheetU2Obj.data[i][idColU2] && sheetU2Obj.data[i][idColU2].toString().toUpperCase().trim() === searchHojaId) {
+        const rowCid = sheetU2Obj.data[i][clienteIdColU2] ? sheetU2Obj.data[i][clienteIdColU2].toString().toUpperCase().trim() : "";
+        const rowMes = sheetU2Obj.data[i][mesColU2] ? sheetU2Obj.data[i][mesColU2].toString().toLowerCase().trim() : "";
+        if (rowCid === searchClienteId && (rowMes === currentMonth.toLowerCase() || rowMes.includes(currentMonth.split(' ')[0].toLowerCase()))) {
           rowIndexU2 = i; break;
         }
       }

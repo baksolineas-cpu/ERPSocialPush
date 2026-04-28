@@ -214,6 +214,14 @@ export default function EntrevistaHub() {
     'Financiamiento M40 Retroactivo'
   ];
 
+  const classifyUniverse = (servicio: string): 'U1' | 'U2' => {
+    const s = servicio.toLowerCase();
+    if (s.includes('modalidad 40') || s.includes('pti') || s.includes('modalidad 10')) {
+      return 'U2';
+    }
+    return 'U1';
+  };
+
   const [iaContext, setIaContext] = useState('');
   const [isAiDrafting, setIsAiDrafting] = useState(false);
   const [fileProgress, setFileProgress] = useState<{[key: string]: number}>({});
@@ -287,8 +295,13 @@ export default function EntrevistaHub() {
     if (!data.id && !data.curp) return;
     try {
       const u2Services = hojaServicio.servicios.filter(s => s.universo === 'U2');
+      const u1Services = hojaServicio.servicios.filter(s => s.universo === 'U1');
+      
       const serviciosU2 = u2Services.map(s => s.nombre).join(', ');
       const montoU2 = u2Services.reduce((sum, s) => sum + (s.precio || 0), 0);
+      
+      const serviciosU1 = u1Services.map(s => s.nombre).join(', ');
+      const montoU1 = u1Services.reduce((sum, s) => sum + (s.precio || 0), 0);
 
       await callGAS('CREATE_CLIENTE', data);
       // También guardamos progreso de la hoja actual
@@ -300,6 +313,8 @@ export default function EntrevistaHub() {
         monto: hojaServicio.honorariosAcordados,
         dictamen: hojaServicio.notasDiagnostico,
         notasExtra: hojaServicio.otroServicioTexto,
+        serviciosU1,
+        montoU1,
         serviciosU2,
         montoU2
       });
@@ -637,9 +652,15 @@ export default function EntrevistaHub() {
     
     setIsProcessing(true);
     const firmaAsesor = sigCanvasAsesor.current?.getTrimmedCanvas().toDataURL('image/png');
+    
     const u2Services = hojaServicio.servicios.filter(s => s.universo === 'U2');
+    const u1Services = hojaServicio.servicios.filter(s => s.universo === 'U1');
+    
     const serviciosU2 = u2Services.map(s => s.nombre).join(', ');
     const montoU2 = u2Services.reduce((sum, s) => sum + (s.precio || 0), 0);
+    
+    const serviciosU1 = u1Services.map(s => s.nombre).join(', ');
+    const montoU1 = u1Services.reduce((sum, s) => sum + (s.precio || 0), 0);
 
     const serviciosFinales = hojaServicio.servicios.map(s => {
       const nombre = s.nombre === 'Otro' ? hojaServicio.otroServicioTexto : s.nombre;
@@ -650,7 +671,6 @@ export default function EntrevistaHub() {
       const yaTieneContrato = data.contrato_url && data.contrato_url.length > 5;
       const tipoDocEval = yaTieneContrato ? 'DIAGNOSTICO' : 'CONTRATO_Y_DIAGNOSTICO';
 
-      console.log("DATA_DEBUG", "Payload enviado a FINALIZE_AUDIT:", data);
       const res = await callGAS('FINALIZE_AUDIT', {
         ...data,
         estatusfirma: 'PENDIENTE',
@@ -660,12 +680,14 @@ export default function EntrevistaHub() {
         dictamen: hojaServicio.notasDiagnostico,
         universo: hojaServicio.universo,
         servicios: serviciosFinales.join(', '),
+        serviciosU1,
+        montoU1,
+        serviciosU2,
+        montoU2,
         monto: hojaServicio.honorariosAcordados,
         auditLog: JSON.stringify(auditLog),
         tipoDocEval,
         notasExtra: hojaServicio.otroServicioTexto,
-        serviciosU2,
-        montoU2,
         estadoAuditoria: 'ENTREVISTA_CONCLUIDA'
       });
 
@@ -881,68 +903,57 @@ export default function EntrevistaHub() {
                         <div className="space-y-3">
                             <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Catálogo de Servicios</label>
                             <div className="grid grid-cols-1 gap-2">
-                                {CATALOGO_SERVICIOS.map(srv => {
-                                    const selectedService = hojaServicio.servicios.find(s => s.nombre === srv);
-                                    const isSelected = !!selectedService;
-                                    return (
-                                        <div key={srv} className={cn("p-4 border rounded-2xl transition-all space-y-3", isSelected ? "bg-[#003366]/5 border-[#003366]/20" : "bg-slate-50 border-slate-100 hover:bg-slate-100")}>
-                                            <label className="flex items-center justify-between cursor-pointer">
-                                                <div className="flex items-center gap-3">
-                                                    <input type="checkbox" checked={isSelected} onChange={(e) => {
-                                                        const updated = e.target.checked 
-                                                            ? [...hojaServicio.servicios, { nombre: srv, universo: 'U1' as const, precio: 0 }]
-                                                            : hojaServicio.servicios.filter(s => s.nombre !== srv);
-                                                        const total = updated.reduce((sum, s) => sum + s.precio, 0);
-                                                        const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
-                                                        setHojaServicio(prev => ({...prev, servicios: updated, honorariosAcordados: total, universo: globalU}));
-                                                    }} className="hidden"/>
-                                                    <span className={cn("text-xs font-bold", isSelected && "text-[#003366]")}>{srv}</span>
-                                                </div>
-                                                {isSelected && <CheckCircle2 size={16} className="text-[#DAA520]" />}
-                                            </label>
-                                            
-                                            {/* Sub-form if selected */}
-                                            <AnimatePresence>
-                                              {isSelected && (
-                                                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="flex gap-2 items-center pt-2 overflow-hidden">
-                                                    <select 
-                                                      className="p-2 bg-white border border-slate-200 rounded-lg text-[10px] font-black uppercase text-slate-600 outline-none focus:border-[#003366] shadow-sm"
-                                                      value={selectedService.universo}
-                                                      onChange={(e) => {
-                                                          const val = e.target.value as 'U1' | 'U2';
-                                                          const updated = [...hojaServicio.servicios];
-                                                          const idx = updated.findIndex(s => s.nombre === srv);
-                                                          if(idx>=0) updated[idx].universo = val;
-                                                          const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
-                                                          setHojaServicio({...hojaServicio, servicios: updated, universo: globalU});
-                                                      }}
-                                                    >
-                                                      <option value="U1">U1 (única vez)</option>
-                                                      <option value="U2">U2 (recurrente)</option>
-                                                    </select>
-                                                    <div className="relative flex-1">
-                                                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-                                                      <input 
-                                                        type="number"
-                                                        placeholder="Honorario..."
-                                                        className="w-full p-2 pl-6 bg-white border border-slate-200 rounded-lg text-xs font-bold text-[#003366] outline-none focus:border-[#DAA520] shadow-sm"
-                                                        value={selectedService.precio || ''}
-                                                        onChange={(e) => {
-                                                            const price = Number(e.target.value);
-                                                            const updated = [...hojaServicio.servicios];
-                                                            const idx = updated.findIndex(s => s.nombre === srv);
-                                                            if(idx>=0) updated[idx].precio = price;
+                                    {CATALOGO_SERVICIOS.map(srv => {
+                                        const selectedService = hojaServicio.servicios.find(s => s.nombre === srv);
+                                        const isSelected = !!selectedService;
+                                        return (
+                                            <div key={srv} className={cn("p-4 border rounded-2xl transition-all space-y-3", isSelected ? "bg-[#003366]/5 border-[#003366]/20" : "bg-slate-50 border-slate-100 hover:bg-slate-100")}>
+                                                <label className="flex items-center justify-between cursor-pointer">
+                                                    <div className="flex items-center gap-3">
+                                                        <input type="checkbox" checked={isSelected} onChange={(e) => {
+                                                            const universe = classifyUniverse(srv);
+                                                            const updated = e.target.checked 
+                                                                ? [...hojaServicio.servicios, { nombre: srv, universo: universe, precio: 0 }]
+                                                                : hojaServicio.servicios.filter(s => s.nombre !== srv);
                                                             const total = updated.reduce((sum, s) => sum + s.precio, 0);
-                                                            setHojaServicio({...hojaServicio, servicios: updated, honorariosAcordados: total});
-                                                        }}
-                                                      />
+                                                            const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
+                                                            setHojaServicio(prev => ({...prev, servicios: updated, honorariosAcordados: total, universo: globalU}));
+                                                        }} className="hidden"/>
+                                                        <div className="flex flex-col">
+                                                            <span className={cn("text-xs font-bold", isSelected && "text-[#003366]")}>{srv}</span>
+                                                            <span className="text-[9px] font-black uppercase text-slate-400">Universo: {classifyUniverse(srv)}</span>
+                                                        </div>
                                                     </div>
-                                                </motion.div>
-                                              )}
-                                            </AnimatePresence>
-                                        </div>
-                                    );
-                                })}
+                                                    {isSelected && <CheckCircle2 size={16} className="text-[#DAA520]" />}
+                                                </label>
+                                                
+                                                {/* Sub-form if selected */}
+                                                <AnimatePresence>
+                                                  {isSelected && (
+                                                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="flex gap-2 items-center pt-2 overflow-hidden">
+                                                        <div className="relative flex-1">
+                                                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
+                                                          <input 
+                                                            type="number"
+                                                            placeholder="Honorario..."
+                                                            className="w-full p-2 pl-6 bg-white border border-slate-200 rounded-lg text-xs font-bold text-[#003366] outline-none focus:border-[#DAA520] shadow-sm"
+                                                            value={selectedService.precio || ''}
+                                                            onChange={(e) => {
+                                                                const price = Number(e.target.value);
+                                                                const updated = [...hojaServicio.servicios];
+                                                                const idx = updated.findIndex(s => s.nombre === srv);
+                                                                if(idx>=0) updated[idx].precio = price;
+                                                                const total = updated.reduce((sum, s) => sum + s.precio, 0);
+                                                                setHojaServicio({...hojaServicio, servicios: updated, honorariosAcordados: total});
+                                                            }}
+                                                          />
+                                                        </div>
+                                                    </motion.div>
+                                                  )}
+                                                </AnimatePresence>
+                                            </div>
+                                        );
+                                    })}
                                 <div className="space-y-4 pt-4 border-t border-slate-100">
                                     <div className="flex justify-between items-center bg-slate-50 p-2 rounded-xl">
                                       <label className="text-[9px] font-black uppercase text-slate-400 px-2">Otros Servicios</label>
@@ -960,7 +971,7 @@ export default function EntrevistaHub() {
                                     </div>
                                     
                                     {hojaServicio.servicios.map((srv, idx) => {
-                                      if (srv.nombre !== 'Otro' && CATALOGO_SERVICIOS.includes(srv.nombre)) return null; // Standard services are rendered above
+                                      if (srv.nombre !== 'Otro' && CATALOGO_SERVICIOS.includes(srv.nombre)) return null; 
                                       return (
                                         <div key={`custom-srv-${idx}`} className="flex gap-2 items-center group animate-in slide-in-from-left duration-300">
                                           <div className="flex-1 relative flex gap-2">
@@ -970,25 +981,17 @@ export default function EntrevistaHub() {
                                               className="flex-1 p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-[#003366] shadow-sm"
                                               value={srv.nombre === 'Otro' ? '' : srv.nombre}
                                               onChange={(e) => {
+                                                  const val = e.target.value || 'Otro';
+                                                  const univ = classifyUniverse(val);
                                                   const updated = [...hojaServicio.servicios];
-                                                  updated[idx].nombre = e.target.value || 'Otro';
+                                                  updated[idx].nombre = val;
+                                                  updated[idx].universo = univ;
                                                   setHojaServicio({...hojaServicio, servicios: updated});
                                               }}
                                             />
-                                            <select 
-                                              className="p-2 bg-white border border-slate-200 rounded-lg text-[10px] font-black uppercase text-slate-600 outline-none focus:border-[#003366] shadow-sm w-30"
-                                              value={srv.universo}
-                                              onChange={(e) => {
-                                                  const val = e.target.value as 'U1' | 'U2';
-                                                  const updated = [...hojaServicio.servicios];
-                                                  updated[idx].universo = val;
-                                                  const globalU = updated.some(s => s.universo === 'U2') ? 'U2' : 'U1';
-                                                  setHojaServicio({...hojaServicio, servicios: updated, universo: globalU});
-                                              }}
-                                            >
-                                                <option value="U1">U1 (única vez)</option>
-                                                <option value="U2">U2 (recurrente)</option>
-                                            </select>
+                                            <div className="w-30 p-2 bg-slate-50 border border-slate-200 rounded-lg text-[8px] font-black uppercase text-slate-500 flex items-center justify-center">
+                                              {srv.universo}
+                                            </div>
                                             <input 
                                               type="number" 
                                               placeholder="Precio..." 
@@ -1151,9 +1154,15 @@ export default function EntrevistaHub() {
                              {!certificationReady ? (
                                 <div className="flex gap-2">
                                    <button type="button" onClick={() => { handleAutoSave(); setActiveStep(3); }} className="px-6 py-5 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-[10px] shadow-md hover:bg-slate-200 transition-all">Regresar</button>
-                                   <button type="button" onClick={handleSellarExpediente} className="flex-1 py-5 bg-[#003366] text-white rounded-2xl font-black uppercase text-[11px] shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2 tracking-widest">
-                                     {isProcessing ? <Loader2 size={16} className="animate-spin" /> : (data.contrato_url && data.contrato_url.length > 5 ? "Sellar y Finalizar Expediente" : "Sellar y Generar Envío")} <ShieldCheck size={16}/>
-                                   </button>
+                                    <button 
+                                      type="button" 
+                                      onClick={handleSellarExpediente} 
+                                      disabled={isProcessing} 
+                                      className="flex-1 py-5 bg-[#003366] disabled:bg-slate-400 text-white rounded-2xl font-black uppercase text-[11px] shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2 tracking-widest"
+                                    >
+                                      {isProcessing ? "Procesando..." : (data.contrato_url && data.contrato_url.length > 5 ? "Sellar y Finalizar Expediente" : "Sellar y Generar Envío")} 
+                                      {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16}/>}
+                                    </button>
                                 </div>
                              ) : (
                                 <div className="flex gap-2">
