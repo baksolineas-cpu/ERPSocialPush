@@ -64,6 +64,10 @@ export default function OperacionesDashboard() {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // RPA
+  const [rpaStatus, setRpaStatus] = useState<{[key: string]: string}>({});
+  const rpaInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -126,9 +130,70 @@ export default function OperacionesDashboard() {
   };
 
   // Lógica de Conciliación
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDualCSVUpload = (e: React.ChangeEvent<HTMLInputElement>, tipoCuenta: 'U1' | 'U2') => {
     const file = e.target.files?.[0];
-    if (file) parseCSV(file);
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      const lines = text.split('\n');
+      
+      let matchCount = 0;
+      let procesados = 0;
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const upperLine = line.toUpperCase();
+        
+        const matchClient = clients.find(c => {
+           return c.id && upperLine.includes(c.id.toUpperCase());
+        });
+
+        if (matchClient) {
+          matchCount++;
+          if (tipoCuenta === 'U2') {
+             try {
+                const res = await callGAS('RECORD_PAYMENT', { clienteId: matchClient.id });
+                if (res?.success) procesados++;
+             } catch(e) {}
+          } else {
+             procesados++; // Logic for U1 could be integrated here... but instructed to "Si encuentra un Match en la 'CONCENTRADORA', debe disparar callGAS('RECORD_PAYMENT'..."
+          }
+        }
+      }
+      
+      alert(`Análisis de ${tipoCuenta} completado.\nCoincidencias encontradas: ${matchCount}\nPagos procesados (U2): ${tipoCuenta === 'U2' ? procesados : 0}`);
+      if (tipoCuenta === 'U2' && procesados > 0) fetchData();
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // clean input
+  };
+
+  const handleRpaDrop = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    for (let i = 0; i < files.length; i++) {
+       const file = files[i];
+       setRpaStatus(prev => ({ ...prev, [file.name]: '⏳ Procesando...' }));
+
+       const reader = new FileReader();
+       reader.onload = async (event) => {
+          const base64 = event.target?.result as string;
+          try {
+             const res = await callGAS('RPA_UPLOAD', { fileData: base64, fileName: file.name });
+             if (res?.success) {
+                setRpaStatus(prev => ({ ...prev, [file.name]: '✔️ ' + res.message }));
+             } else {
+                setRpaStatus(prev => ({ ...prev, [file.name]: '❌ Error: ' + res.error }));
+             }
+          } catch(err) {
+             setRpaStatus(prev => ({ ...prev, [file.name]: '❌ Hubo un error de conexión' }));
+          }
+       };
+       reader.readAsDataURL(file);
+    }
   };
 
   const handlePaymentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -522,87 +587,86 @@ export default function OperacionesDashboard() {
 
         {activeTab === 'conciliacion' && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div 
-              className={cn(
-                "h-64 rounded-[40px] border-2 border-dashed flex flex-col items-center justify-center transition-all cursor-pointer group",
-                isDragging ? "border-gold bg-gold/10 scale-[0.99]" : "border-white/10 bg-white/5 hover:border-gold/50 hover:bg-white/10"
-              )}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setIsDragging(false);
-                const file = e.dataTransfer.files[0];
-                if (file) parseCSV(file);
-              }}
-            >
-              <div className="w-16 h-16 bg-white/10 group-hover:bg-gold/20 rounded-[20px] flex items-center justify-center mb-6 transition-colors shadow-2xl">
-                <Upload className="text-white/40 group-hover:text-gold" size={32} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Zona A: U2 */}
+              <div 
+                className="h-64 rounded-[40px] border-2 border-dashed border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-500 hover:bg-emerald-500/10 flex flex-col items-center justify-center transition-all cursor-pointer group"
+                onClick={() => document.getElementById('csv-u2')?.click()}
+              >
+                <div className="w-16 h-16 bg-emerald-500/20 group-hover:bg-emerald-500/40 rounded-[20px] flex items-center justify-center mb-6 transition-colors shadow-2xl">
+                  <Upload className="text-emerald-400" size={32} />
+                </div>
+                <h3 className="text-lg font-black text-emerald-400 italic uppercase tracking-tight text-center">Cargar Estado de Cuenta</h3>
+                <h4 className="text-xl font-black text-white uppercase tracking-widest mt-1">CONCENTRADORA (U2)</h4>
+                <p className="text-[10px] text-white/40 font-black uppercase tracking-widest mt-3 text-center px-4">Procesa automáticamente Líneas de Captura</p>
+                <input 
+                  id="csv-u2"
+                  type="file" 
+                  onChange={(e) => handleDualCSVUpload(e, 'U2')} 
+                  className="hidden" 
+                  accept=".csv"
+                />
               </div>
-              <h3 className="text-lg font-black text-white italic uppercase tracking-tight">Cargar CSV de Banco</h3>
-              <p className="text-[10px] text-white/30 font-black uppercase tracking-widest mt-1">Arrastra tu archivo aquí o haz clic para buscar</p>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileUpload} 
-                className="hidden" 
-                accept=".csv"
-              />
+
+              {/* Zona B: U1 */}
+              <div 
+                className="h-64 rounded-[40px] border-2 border-dashed border-gold/30 bg-gold/5 hover:border-gold hover:bg-gold/10 flex flex-col items-center justify-center transition-all cursor-pointer group"
+                onClick={() => document.getElementById('csv-u1')?.click()}
+              >
+                <div className="w-16 h-16 bg-gold/20 group-hover:bg-gold/40 rounded-[20px] flex items-center justify-center mb-6 transition-colors shadow-2xl">
+                  <Upload className="text-gold" size={32} />
+                </div>
+                <h3 className="text-lg font-black text-gold italic uppercase tracking-tight text-center">Cargar Estado de Cuenta</h3>
+                <h4 className="text-xl font-black text-white uppercase tracking-widest mt-1">HONORARIOS (U1)</h4>
+                <p className="text-[10px] text-white/40 font-black uppercase tracking-widest mt-3 text-center px-4">Conciliación de Pagos Individuales</p>
+                <input 
+                  id="csv-u1"
+                  type="file" 
+                  onChange={(e) => handleDualCSVUpload(e, 'U1')} 
+                  className="hidden" 
+                  accept=".csv"
+                />
+              </div>
             </div>
 
-            {csvData.length > 0 && (
-              <section className="bg-white/5 rounded-[32px] border border-white/10 overflow-hidden shadow-2xl animate-in slide-in-from-top-8 duration-500">
-                 <div className="p-8 border-b border-white/5">
-                   <h2 className="text-xl font-black text-gold italic uppercase tracking-tight">Revisión Humana Requerida</h2>
-                   <p className="text-[10px] text-white/30 font-black uppercase tracking-widest">Resultados del cruce inteligente con base de clientes</p>
+            {/* BUZÓN DE DISPERSIÓN RPA */}
+            <section className="bg-white/5 rounded-[32px] border border-white/10 overflow-hidden shadow-2xl mt-12 p-8">
+               <div className="mb-6">
+                 <h2 className="text-2xl font-black text-white italic uppercase tracking-tight">Buzón de Dispersión RPA</h2>
+                 <p className="text-[10px] text-white/40 font-black uppercase tracking-widest mt-1">Automatización de subidas para Líneas de Captura (LC) y Comprobantes (CI)</p>
+               </div>
+               
+               <div 
+                 className="h-32 rounded-3xl border-2 border-dashed border-white/20 bg-white/5 hover:border-white/50 hover:bg-white/10 flex flex-col items-center justify-center transition-all cursor-pointer group"
+                 onClick={() => rpaInputRef.current?.click()}
+               >
+                 <Upload className="text-white/40 group-hover:text-white mb-2" size={24} />
+                 <span className="text-xs font-black text-white/60 group-hover:text-white uppercase tracking-widest">Sube múltiples PDFs aquí</span>
+                 <input 
+                   type="file" 
+                   ref={rpaInputRef} 
+                   onChange={handleRpaDrop} 
+                   className="hidden" 
+                   multiple
+                   accept=".pdf"
+                 />
+               </div>
+
+               {Object.keys(rpaStatus).length > 0 && (
+                 <div className="mt-6 space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                   {Object.entries(rpaStatus).map(([filename, status]) => (
+                     <div key={filename} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5">
+                        <span className="text-[10px] font-bold text-white max-w-[200px] md:max-w-md truncate">{filename}</span>
+                        <span className={cn(
+                          "text-[10px] font-black uppercase tracking-wider",
+                          status.includes('✔️') ? "text-emerald-400" :
+                          status.includes('❌') ? "text-red-400" : "text-gold animate-pulse"
+                        )}>{status}</span>
+                     </div>
+                   ))}
                  </div>
-                 
-                 <div className="overflow-x-auto">
-                   <table className="w-full text-left">
-                     <thead>
-                       <tr className="bg-white/5 text-white/30 text-[10px] font-black uppercase tracking-widest">
-                         <th className="px-8 py-5">Fecha</th>
-                         <th className="px-8 py-5">Concepto Banco</th>
-                         <th className="px-8 py-5">Monto</th>
-                         <th className="px-8 py-5">Cliente Sugerido</th>
-                         <th className="px-8 py-5 text-center">Match %</th>
-                         <th className="px-8 py-5 text-right">Acción</th>
-                       </tr>
-                     </thead>
-                     <tbody className="divide-y divide-white/5">
-                        {csvData.map((row, i) => (
-                          <tr key={i} className="hover:bg-white/10 transition-colors">
-                            <td className="px-8 py-6 text-[11px] font-bold text-white uppercase">{row.fecha}</td>
-                            <td className="px-8 py-6">
-                               <p className="text-[10px] font-black text-white/80 max-w-[200px] truncate uppercase">{row.concepto}</p>
-                            </td>
-                            <td className="px-8 py-6">
-                               <span className="text-xs font-black text-emerald-400">${row.monto}</span>
-                            </td>
-                            <td className="px-8 py-6">
-                               <div className="flex flex-col">
-                                  <span className="text-[10px] font-black text-gold uppercase">{row.sugerencia}</span>
-                               </div>
-                            </td>
-                            <td className="px-8 py-6 text-center">
-                               <div className="flex items-center justify-center gap-1.5">
-                                  <div className="w-12 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                     <div className="h-full bg-gold shadow-[0_0_10px_rgba(218,165,32,0.5)]" style={{ width: `${row.match}%` }} />
-                                  </div>
-                                  <span className="text-[9px] font-black text-gold">{row.match}%</span>
-                               </div>
-                            </td>
-                            <td className="px-8 py-6 text-right">
-                               <button className="px-4 py-2 bg-emerald-500/10 text-emerald-400 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-500 hover:text-white transition-all shadow-lg active:scale-95">Validar Pago</button>
-                            </td>
-                          </tr>
-                        ))}
-                     </tbody>
-                   </table>
-                 </div>
-              </section>
-            )}
+               )}
+            </section>
           </div>
         )}
         {activeTab === ('calendario' as any) && (
