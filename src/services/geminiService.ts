@@ -36,13 +36,15 @@ export async function extractDocumentData(base64Image: string, mimeType: string,
     "rfc": "13 caracteres",
     "nss": "11 dígitos sin espacios",
     "semanasCotizadas": "Solo el número entero",
-    "ultimoSalario": "Número decimal sin símbolos"
+    "ultimoSalario": "Número decimal sin símbolos",
+    "domicilio": "Dirección completa si está disponible"
   }
   
   GUÍA DE BÚSQUEDA TÉCNICA (MÁXIMA PRIORIDAD):
-  - "nss": Busca el patrón de 11 dígitos, usualmente tras la etiqueta "NSS:". Ejemplo: 1215 85 4102 5 -> 12158541025.
-  - "semanasCotizadas": Busca el número junto a "Semanas Reconocidas" o "Semanas para trámite de pensión". Ejemplo: "Semanas Reconocidas: 542" -> 542.
-  - "ultimoSalario": Busca el monto decimal junto a "SBC ($)", "Salario Base de Cotización" o "SBC". Ejemplo: "SBC ($) $1,250.40" -> 1250.40.
+  - "nss": Busca el patrón de 11 dígitos, usualmente tras la etiqueta "NSS:".
+  - "semanasCotizadas": Busca el número junto a "Semanas Reconocidas" o "Semanas para trámite de pensión".
+  - "ultimoSalario": Busca el monto decimal junto a "SBC ($)", "Salario Base de Cotización" o "SBC".
+  - "domicilio": Busca la dirección completa en documentos como INE, Recibo de Luz (CFE), o Constancia de Situación Fiscal (SAT).
   
   Si un dato no está presente en este documento específico, devuelve NULL para ese campo, NO devuelvas strings vacíos ni ceros.`;
   

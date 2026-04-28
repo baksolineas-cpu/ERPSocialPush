@@ -55,6 +55,8 @@ function doPost(e) {
       return handleGetClienteStatus(payload);
     } else if (action === 'RECORD_PAYMENT') {
       return handleRecordPayment(payload);
+    } else if (action === 'UPDATE_CLIENTE') {
+      return handleUpdateCliente(payload);
     } else if (action === 'RPA_UPLOAD') {
       return handleRpaUpload(payload);
     } else if (action === 'PAY_COMMISSION') {
@@ -65,6 +67,72 @@ function doPost(e) {
   } catch (error) {
     logDebug("❌ ERROR POST", error.toString());
     return createResponse({ error: error.toString() }, 500);
+  }
+}
+
+/**
+ * Actualiza un cliente existente en la hoja CLIENTES.
+ */
+function handleUpdateCliente(payload) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (e) {
+    return createResponse({ success: false, error: 'Sistema ocupado' }, 429);
+  }
+
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName("CLIENTES");
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => h.toString().toLowerCase().trim());
+    
+    const idCol = headers.indexOf("id");
+    const curpCol = headers.indexOf("curp");
+    
+    const searchId = (payload.id || "").toString().toUpperCase().trim();
+    const searchCurp = (payload.curp || "").toString().toUpperCase().trim();
+    
+    let rowIndex = -1;
+    for (let i = 1; i < data.length; i++) {
+      const rowId = data[i][idCol] ? data[i][idCol].toString().toUpperCase().trim() : "";
+      const rowCurp = data[i][curpCol] ? data[i][curpCol].toString().toUpperCase().trim() : "";
+      
+      if ((searchId && rowId === searchId) || (searchCurp && rowCurp === searchCurp)) {
+        rowIndex = i;
+        break;
+      }
+    }
+
+    if (rowIndex === -1) {
+      return createResponse({ success: false, error: "Cliente no encontrado" }, 404);
+    }
+
+    // Actualizamos solo los campos permitidos y enviados
+    // Mapeo exacto basado en handleCreateCliente
+    // 1 (B): Nombre
+    if (payload.nombre !== undefined) sheet.getRange(rowIndex + 1, 2).setValue(payload.nombre);
+    // 5 (E): NSS (headers 1-indexed -> index 5)
+    if (payload.nss !== undefined) sheet.getRange(rowIndex + 1, 5).setValue(payload.nss);
+    // 7 (G): WhatsApp
+    if (payload.whatsapp !== undefined) sheet.getRange(rowIndex + 1, 7).setValue(payload.whatsapp);
+    // 8 (H): Email
+    if (payload.email !== undefined) sheet.getRange(rowIndex + 1, 8).setValue(payload.email);
+    // 11 (K): Domicilio
+    if (payload.domicilio !== undefined) sheet.getRange(rowIndex + 1, 11).setValue(payload.domicilio);
+    // 15 (O): Semanas
+    if (payload.semanasCotizadas !== undefined) sheet.getRange(rowIndex + 1, 15).setValue(payload.semanasCotizadas);
+    // 16 (P): Salario
+    if (payload.ultimoSalario !== undefined) sheet.getRange(rowIndex + 1, 16).setValue(payload.ultimoSalario);
+    // 18 (R): Notas
+    if (payload.notasSeguimiento !== undefined) sheet.getRange(rowIndex + 1, 18).setValue(payload.notasSeguimiento);
+
+    return createResponse({ success: true });
+  } catch (error) {
+    logDebug("ERR_UPDATE_CLIENTE", error.toString());
+    return createResponse({ success: false, error: error.toString() }, 500);
+  } finally {
+    lock.releaseLock();
   }
 }
 

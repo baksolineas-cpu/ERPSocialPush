@@ -139,12 +139,19 @@ export default function OperacionesDashboard() {
     regimenFiscal: '',
     promotor: '',
     origen: 'Migración',
-    whatsapp: ''
+    whatsapp: '',
+    domicilio: ''
   });
   const [aiIdentifiedFields, setAiIdentifiedFields] = useState<Set<string>>(new Set());
   const [isExtractingDocuments, setIsExtractingDocuments] = useState(false);
   const [isSavingMigration, setIsSavingMigration] = useState(false);
   const [migrationFiles, setMigrationFiles] = useState<{name: string, content: string}[]>([]);
+  
+  // Modal Edición Cliente
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedClientToEdit, setSelectedClientToEdit] = useState<any>(null);
+  const [isUpdatingClient, setIsUpdatingClient] = useState(false);
+  
   const [promotoresList, setPromotoresList] = useState<any[]>([]);
   const migrationFileInputRef = useRef<HTMLInputElement>(null);
   const paymentInputRef = useRef<HTMLInputElement>(null);
@@ -375,21 +382,22 @@ export default function OperacionesDashboard() {
       let mergedData = { ...migrationData };
       const newAiFields = new Set<string>();
 
+      // Procesamiento Secuencial con delay para evitar Quota Exceeded
       for (const file of files) {
-        const reader = new FileReader();
-        const filePromise = new Promise<{name: string, content: string}>((resolve) => {
+        const fileObj = await new Promise<{name: string, content: string}>((resolve) => {
+          const reader = new FileReader();
           reader.onload = (event) => {
             resolve({ name: file.name, content: event.target?.result as string });
           };
+          reader.readAsDataURL(file);
         });
-        reader.readAsDataURL(file);
-        const fileObj = await filePromise;
+        
         setMigrationFiles(prev => [...prev, fileObj]);
 
         try {
           const extracted = await extractDocumentData(fileObj.content, file.type);
           if (extracted) {
-             const fieldsToSync = ['nombre', 'curp', 'rfc', 'nss', 'semanasCotizadas', 'ultimoSalario', 'regimenFiscal', 'cp'];
+             const fieldsToSync = ['nombre', 'curp', 'rfc', 'nss', 'semanasCotizadas', 'ultimoSalario', 'regimenFiscal', 'cp', 'domicilio'];
              fieldsToSync.forEach(field => {
                 let val = (extracted as any)[field === 'cp' ? 'codigoPostal' : field];
                 
@@ -411,6 +419,8 @@ export default function OperacionesDashboard() {
                 }
              });
           }
+          // Pequeño delay entre archivos para la cuota
+          await new Promise(r => setTimeout(r, 600));
         } catch (err) {
           console.warn("OCR Error for file:", file.name, err);
         }
@@ -420,6 +430,25 @@ export default function OperacionesDashboard() {
       setAiIdentifiedFields(newAiFields);
       setIsExtractingDocuments(false);
       setMigrationModalStep('Revision');
+    }
+  };
+
+  const handleUpdateCliente = async () => {
+    if (!selectedClientToEdit) return;
+    setIsUpdatingClient(true);
+    try {
+      const res = await callGAS('UPDATE_CLIENTE', selectedClientToEdit);
+      if (res?.success) {
+        alert("Cliente actualizado correctamente");
+        setShowEditModal(false);
+        fetchData();
+      } else {
+        alert("Error al actualizar: " + res?.error);
+      }
+    } catch (e) {
+      console.error("Error updating client", e);
+    } finally {
+      setIsUpdatingClient(false);
     }
   };
 
@@ -447,7 +476,8 @@ export default function OperacionesDashboard() {
         setMigrationData({ 
           nombre: '', curp: '', rfc: '', nss: '', 
           email: '', cp: '', semanasCotizadas: 0, ultimoSalario: 0, 
-          regimenFiscal: '', promotor: '', origen: 'Migración', whatsapp: '' 
+          regimenFiscal: '', promotor: '', origen: 'Migración', whatsapp: '',
+          domicilio: ''
         });
         setMigrationFiles([]);
         setMigrationModalStep('Carga');
@@ -650,6 +680,16 @@ export default function OperacionesDashboard() {
                           </td>
                           <td className="px-8 py-6 text-right">
                             <div className="flex justify-end gap-3 opacity-40 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={() => {
+                                  setSelectedClientToEdit({ ...client });
+                                  setShowEditModal(true);
+                                }}
+                                className="p-2 hover:bg-white/10 rounded-xl text-gold transition-all hover:scale-110" 
+                                title="Editar Cliente"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-pencil"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                              </button>
                               <button 
                                 onClick={() => {
                                   setUploadingPaymentFor(client.id || null);
@@ -1258,6 +1298,19 @@ export default function OperacionesDashboard() {
                             )}
                           />
                         </div>
+                        <div className="space-y-1.5">
+                           <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Domicilio Completo</label>
+                           <textarea 
+                            rows={2}
+                            value={migrationData.domicilio}
+                            onChange={(e) => setMigrationData({ ...migrationData, domicilio: e.target.value })}
+                            className={cn(
+                              "w-full px-5 py-3.5 bg-white/5 border rounded-2xl outline-none text-xs font-bold uppercase resize-none",
+                              aiIdentifiedFields.has('domicilio') ? "border-gold/30" : "border-white/10"
+                            )}
+                            placeholder="DIRECCIÓN IDENTIFICADA POR IA..."
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -1325,6 +1378,168 @@ export default function OperacionesDashboard() {
       </AnimatePresence>
       
       <input type="file" accept=".pdf,image/*" ref={paymentInputRef} onChange={handlePaymentUpload} className="hidden" />
+
+      {/* MODAL EDICION CLIENTE */}
+      <AnimatePresence>
+        {showEditModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-[#0A0D14]/95 backdrop-blur-md"
+              onClick={() => !isUpdatingClient && setShowEditModal(false)}
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-[#141821] border border-white/10 rounded-[40px] shadow-2xl p-10 custom-scrollbar"
+            >
+              <div className="flex justify-between items-start mb-8 relative">
+                <div>
+                  <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">Editar Expediente Cliente</h3>
+                  <p className="text-[10px] text-gold font-black uppercase tracking-[0.2em] mt-1 italic">
+                    Actualización de Ficha Técnica
+                  </p>
+                </div>
+                <button onClick={() => setShowEditModal(false)} className="p-2 text-white/20 hover:text-white transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+                {/* BLOQUEADOS */}
+                <div className="space-y-6">
+                  <h4 className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em] pb-2 border-b border-white/5">Datos Maestros (Bloqueados)</h4>
+                  {[
+                    { label: 'ID Sistema', value: selectedClientToEdit?.id },
+                    { label: 'CURP', value: selectedClientToEdit?.curp },
+                    { label: 'RFC', value: selectedClientToEdit?.rfc }
+                  ].map((field, i) => (
+                    <div key={i} className="space-y-1.5 opacity-50">
+                      <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">{field.label}</label>
+                      <input 
+                        type="text" 
+                        readOnly
+                        value={field.value || ''}
+                        className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl outline-none text-xs font-bold uppercase cursor-not-allowed"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* EDITABLES */}
+                <div className="space-y-6">
+                  <h4 className="text-[10px] font-black text-gold/30 uppercase tracking-[0.3em] pb-2 border-b border-gold/5">Campos Editables</h4>
+                  
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Nombre Completo</label>
+                    <input 
+                      type="text" 
+                      value={selectedClientToEdit?.nombre || ''}
+                      onChange={(e) => setSelectedClientToEdit({ ...selectedClientToEdit, nombre: e.target.value.toUpperCase() })}
+                      className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl outline-none text-xs font-bold uppercase focus:border-gold/30"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">WhatsApp</label>
+                      <input 
+                        type="text" 
+                        maxLength={10}
+                        value={selectedClientToEdit?.whatsapp || ''}
+                        onChange={(e) => setSelectedClientToEdit({ ...selectedClientToEdit, whatsapp: e.target.value.replace(/\D/g, '') })}
+                        className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl outline-none text-xs font-bold uppercase focus:border-gold/30"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">NSS</label>
+                      <input 
+                        type="text" 
+                        maxLength={11}
+                        value={selectedClientToEdit?.nss || ''}
+                        onChange={(e) => setSelectedClientToEdit({ ...selectedClientToEdit, nss: e.target.value.replace(/\D/g, '') })}
+                        className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl outline-none text-xs font-bold uppercase focus:border-gold/30"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Semanas</label>
+                      <input 
+                        type="number" 
+                        value={selectedClientToEdit?.semanascotizadas || selectedClientToEdit?.semanasCotizadas || 0}
+                        onChange={(e) => setSelectedClientToEdit({ ...selectedClientToEdit, semanasCotizadas: parseInt(e.target.value) || 0 })}
+                        className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl outline-none text-xs font-bold uppercase focus:border-gold/30"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Último Salario</label>
+                      <input 
+                        type="number" 
+                        value={selectedClientToEdit?.ultimosalario || selectedClientToEdit?.ultimoSalario || 0}
+                        onChange={(e) => setSelectedClientToEdit({ ...selectedClientToEdit, ultimoSalario: parseFloat(e.target.value) || 0 })}
+                        className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl outline-none text-xs font-bold uppercase focus:border-gold/30"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Email</label>
+                    <input 
+                      type="email" 
+                      value={selectedClientToEdit?.email || ''}
+                      onChange={(e) => setSelectedClientToEdit({ ...selectedClientToEdit, email: e.target.value })}
+                      className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl outline-none text-xs font-bold uppercase focus:border-gold/30"
+                    />
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 space-y-6">
+                   <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Domicilio Completo</label>
+                    <textarea 
+                      rows={2}
+                      value={selectedClientToEdit?.domicilio || selectedClientToEdit?.domicilioextraido || ''}
+                      onChange={(e) => setSelectedClientToEdit({ ...selectedClientToEdit, domicilio: e.target.value.toUpperCase() })}
+                      className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl outline-none text-xs font-bold uppercase resize-none focus:border-gold/30"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Notas de Seguimiento</label>
+                    <textarea 
+                      rows={3}
+                      value={selectedClientToEdit?.notasseguimiento || selectedClientToEdit?.notasSeguimiento || ''}
+                      onChange={(e) => setSelectedClientToEdit({ ...selectedClientToEdit, notasSeguimiento: e.target.value })}
+                      className="w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl outline-none text-xs font-bold uppercase resize-none focus:border-gold/30"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-10 flex gap-4">
+                <button 
+                  onClick={() => setShowEditModal(false)}
+                  disabled={isUpdatingClient}
+                  className="flex-1 py-5 bg-white/5 text-white/40 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-white/10 transition-all disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={handleUpdateCliente}
+                  disabled={isUpdatingClient}
+                  className="flex-[2] py-5 bg-gold text-black rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-2xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isUpdatingClient ? <Loader2 className="animate-spin" size={18} /> : "Guardar Cambios"} <Check size={18} />
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showWAModal && (
