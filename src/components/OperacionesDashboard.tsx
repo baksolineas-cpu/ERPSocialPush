@@ -393,26 +393,21 @@ export default function OperacionesDashboard() {
              fieldsToSync.forEach(field => {
                 let val = (extracted as any)[field === 'cp' ? 'codigoPostal' : field];
                 
-                // Limpieza agresiva y técnica según directiva de Operaciones
-                if (field === 'ultimoSalario' && val !== null) {
-                  const cleanedVal = String(val).replace(/[^0-9.]/g, '');
-                  val = parseFloat(cleanedVal) || 0;
+                // Limpieza técnica estricta directiva de Operaciones
+                if (field === 'nss' && typeof val === 'string') {
+                  val = val.replace(/\s/g, '').replace(/-/g, '');
                 }
                 if (field === 'semanasCotizadas' && val !== null) {
-                  const cleanedVal = String(val).replace(/[^0-9]/g, '');
-                  val = Math.floor(parseInt(cleanedVal)) || 0;
+                  val = parseInt(String(val).replace(/[^0-9]/g, '')) || 0;
+                }
+                if (field === 'ultimoSalario' && val !== null) {
+                  val = parseFloat(String(val).replace(/[^0-9.]/g, '')) || 0;
                 }
 
-                // Merge Inteligente: Solo actualiza si Gemini encontró el dato (no nulo)
-                if (val !== null && val !== "" && val !== 0 && !mergedData[field as keyof typeof mergedData]) {
+                // Safe Merge: Priorizar el valor extraído si no es nulo/vacío para que los documentos se complementen
+                if (val !== null && val !== "" && val !== 0) {
                    (mergedData as any)[field] = val;
                    newAiFields.add(field);
-                } else if (val !== null && val !== "" && val !== 0) {
-                   // Si ya tiene valor, pero Gemini trae algo nuevo, priorizamos si el anterior era nulo o vacío
-                   if (!(mergedData as any)[field]) {
-                      (mergedData as any)[field] = val;
-                      newAiFields.add(field);
-                   }
                 }
              });
           }

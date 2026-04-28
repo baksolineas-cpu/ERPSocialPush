@@ -29,11 +29,20 @@ export async function extractDocumentData(base64Image: string, mimeType: string,
   if (!ai) throw new Error('CONFIG_ERROR: GEMINI_API_KEY no configurada');
   const cleanBase64 = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
   
-  let promptText = `Extrae los siguientes datos en formato JSON puro: {nombre, curp, rfc, nss, semanasCotizadas, ultimoSalario}.
-
-  Para 'semanasCotizadas', busca números enteros cerca de 'Semanas Reconocidas' o 'Semanas para trámite de pensión'.
-  Para 'ultimoSalario', busca montos decimales cerca de 'SBC' o 'Salario Base de Cotización'.
-  Para 'nss', busca el patrón de 11 dígitos.
+  let promptText = `Extrae datos de documentos de seguridad social de México. Devuelve ÚNICAMENTE un objeto JSON con esta estructura exacta, usando NULL si el dato no existe:
+  {
+    "nombre": "Nombre completo",
+    "curp": "18 caracteres",
+    "rfc": "13 caracteres",
+    "nss": "11 dígitos sin espacios",
+    "semanasCotizadas": "Solo el número entero",
+    "ultimoSalario": "Número decimal sin símbolos"
+  }
+  
+  GUÍA DE BÚSQUEDA TÉCNICA (MÁXIMA PRIORIDAD):
+  - "nss": Busca el patrón de 11 dígitos, usualmente tras la etiqueta "NSS:". Ejemplo: 1215 85 4102 5 -> 12158541025.
+  - "semanasCotizadas": Busca el número junto a "Semanas Reconocidas" o "Semanas para trámite de pensión". Ejemplo: "Semanas Reconocidas: 542" -> 542.
+  - "ultimoSalario": Busca el monto decimal junto a "SBC ($)", "Salario Base de Cotización" o "SBC". Ejemplo: "SBC ($) $1,250.40" -> 1250.40.
   
   Si un dato no está presente en este documento específico, devuelve NULL para ese campo, NO devuelvas strings vacíos ni ceros.`;
   
@@ -87,12 +96,12 @@ export async function extractDocumentData(base64Image: string, mimeType: string,
     nombre: parsed.nombre ? String(parsed.nombre).trim().replace(/[\n\r]/g, ' ') : null,
     curp: parsed.curp ? String(parsed.curp).trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : null,
     rfc: parsed.rfc ? String(parsed.rfc).trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : null,
-    nss: parsed.nss ? cleanNum(parsed.nss) : null,
-    semanasCotizadas: parsed.semanasCotizadas !== null ? (parseInt(cleanNum(parsed.semanasCotizadas)) || 0) : null,
-    ultimoSalario: parsed.ultimoSalario !== null ? (parseFloat(String(parsed.ultimoSalario).replace(/[^0-9.]/g, '')) || 0) : null,
+    nss: parsed.nss ? String(parsed.nss).replace(/[^0-9]/g, '') : null,
+    semanasCotizadas: (parsed.semanasCotizadas !== null && parsed.semanasCotizadas !== undefined) ? (parseInt(String(parsed.semanasCotizadas).replace(/[^0-9]/g, '')) || 0) : null,
+    ultimoSalario: (parsed.ultimoSalario !== null && parsed.ultimoSalario !== undefined) ? (parseFloat(String(parsed.ultimoSalario).replace(/[^0-9.]/g, '')) || 0) : null,
     regimenFiscal: parsed.regimenFiscal ? String(parsed.regimenFiscal).trim() : null,
     domicilio: parsed.domicilio ? String(parsed.domicilio).trim().replace(/[\n\r]/g, ' ') : null,
-    codigoPostal: (parsed.codigoPostal || parsed.cp) ? cleanNum(parsed.codigoPostal || parsed.cp).substring(0, 5) : null,
+    codigoPostal: (parsed.codigoPostal || parsed.cp) ? String(parsed.codigoPostal || parsed.cp).replace(/[^0-9]/g, '').substring(0, 5) : null,
     tipo_complemento: parsed.tipo_complemento || 'Ninguno',
     semanas_extra: parseInt(cleanNum(parsed.semanas_extra)) || 0,
     patrones: parsed.patrones ? String(parsed.patrones).trim() : null

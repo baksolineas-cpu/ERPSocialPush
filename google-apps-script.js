@@ -675,38 +675,50 @@ function handleCreateCliente(payload) {
     
     mapUpdate(26, estatusComision);                            // AA: ComisionActiva
     
-    // Carpeta Drive (Inteligencia de Carpetas)
-    let folderId = rowData[11] || payload.id_carpeta_drive;
-    if (!folderId) {
-       // Buscar si ya existe una carpeta con este CURP (Ej. de Onboarding)
-       const folders = DriveApp.getFolderById(ROOT_FOLDER_ID).searchFolders(`title contains '[${curp10}]'`);
-       if (folders.hasNext()) {
-          const folder = folders.next();
-          folderId = folder.getId();
-          logDebug("FOLDER_SYNC", "Carpeta encontrada en Drive: " + folderId);
-       } else {
-          const folder = DriveApp.getFolderById(ROOT_FOLDER_ID).createFolder(`[${curp10}] ${payload.nombre || "NUEVO"}`);
-          folderId = folder.getId();
-          if (payload.email && payload.email.indexOf('@') > -1) {
-            try { folder.addViewer(payload.email); } catch(e) {}
+    // Carpeta Drive (Inteligencia de Carpetas) - Robustecida
+    let folderId = (rowData[11] || payload.id_carpeta_drive || "").toString().trim();
+    if (folderId.length < 5) folderId = ""; // No usar IDs basura
+
+    if (!folderId && ROOT_FOLDER_ID && ROOT_FOLDER_ID.length > 5) {
+      try {
+        const rootFolder = DriveApp.getFolderById(ROOT_FOLDER_ID);
+        if (rootFolder) {
+          // Buscar si ya existe una carpeta con este CURP (Ej. de Onboarding)
+          const folders = rootFolder.searchFolders(`title contains '[${curp10}]'`);
+          if (folders.hasNext()) {
+             const folder = folders.next();
+             folderId = folder.getId();
+             logDebug("FOLDER_SYNC", "Carpeta encontrada en Drive: " + folderId);
+          } else {
+             const folderName = `[${curp10}] ${payload.nombre || "NUEVO"}`;
+             const folder = rootFolder.createFolder(folderName);
+             folderId = folder.getId();
+             if (payload.email && payload.email.indexOf('@') > -1) {
+               try { folder.addViewer(payload.email); } catch(e) {}
+             }
           }
-       }
+        }
+      } catch(e) {
+        logDebug("DRIVE_ERR", "No se pudo gestionar la carpeta Drive en ROOT: " + e.toString());
+        folderId = "";
+      }
     }
     
-    // START Fix Smart Folder Renaming
-    if (folderId && payload.nombre) {
+    // Fix Smart Folder Renaming - Robustecido
+    if (folderId && folderId.length > 5 && payload.nombre) {
       try {
         const folder = DriveApp.getFolderById(folderId);
-        if (folder.getName().includes("NUEVO")) {
-          folder.setName(`[${curp10}] ${payload.nombre}`.trim());
+        if (folder && folder.getName().includes("NUEVO")) {
+           folder.setName(`[${curp10}] ${payload.nombre}`.trim());
         }
-      } catch(e) {}
+      } catch(e) {
+        logDebug("RENAME_ERR", "Error al renombrar o acceder a folderId " + folderId + ": " + e.toString());
+      }
     }
-    // END Fix Smart Folder Renaming
     mapUpdate(11, folderId);                                   // L: ID_Carpeta_Drive
     
     // PROCESAR DOCUMENTOS ENVIADOS DESDE FRONTEND (Si existen)
-    if (payload.documentos && Array.isArray(payload.documentos)) {
+    if (payload.documentos && Array.isArray(payload.documentos) && folderId && folderId.length > 5) {
       logDebug("DBG_DOCS", "Procesando " + payload.documentos.length + " doc(s) en folder: " + folderId);
       try {
         const folder = DriveApp.getFolderById(folderId);
@@ -762,6 +774,9 @@ function handleCreateCliente(payload) {
     }
 
     return createResponse({ success: true, id: curp10, id_carpeta_drive: folderId });
+  } catch(e) {
+    logDebug("CREATE_CLIENTE_FATAL", e.toString());
+    return createResponse({ status: 'error', error: e.toString() }, 500);
   } finally {
     lock.releaseLock();
   }
