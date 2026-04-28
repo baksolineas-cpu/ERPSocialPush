@@ -335,33 +335,28 @@ function handleFinalizeAudit(payload) {
         
         // D. PERSISTENCIA DE LA URL DEL DIAGNÓSTICO
         if (finalDiagUrl && payload.id_hoja) {
-          try {
-            const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-            const isU2 = payload.universo === 'U2' || (payload.serviciosU2 && payload.montoU2 > 0);
-            const sheetName = isU2 ? "GESTIONES_U2" : "HOJAS_SERVICIO";
-            let sheetH = ss.getSheetByName(sheetName) || ss.getSheetByName("HOJAS_SERVICIO");
+          const isU2 = payload.universo === 'U2' || (payload.serviciosU2 && payload.montoU2 > 0);
+          const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+          let sheetH = ss.getSheetByName(isU2 ? "GESTIONES_U2" : "HOJAS_SERVICIO");
+          if (sheetH) {
+            const dH = sheetH.getDataRange().getValues(); 
+            const headersH = dH[0].map(h => h.toString().toLowerCase().trim());
+            const idCol = headersH.indexOf("id_hoja") !== -1 ? headersH.indexOf("id_hoja") : headersH.indexOf("id");
             
-            if (sheetH) {
-              const dataH = sheetH.getDataRange().getValues();
-              const headersH = dataH[0].map(h => h.toString().toLowerCase().trim());
-              const idHojaCol = headersH.indexOf("id_hoja") !== -1 ? headersH.indexOf("id_hoja") : headersH.indexOf("id");
-              let urlDiagCol = headersH.indexOf("url_diagnostico");
-              
-              // Si la columna no existe, la creamos al final
-              if (urlDiagCol === -1) {
-                urlDiagCol = headersH.length;
-                sheetH.getRange(1, urlDiagCol + 1).setValue("URL_Diagnostico");
-              }
-  
-              const searchHId = payload.id_hoja.toString().toUpperCase().trim();
-              for (let i = 1; i < dataH.length; i++) {
-                if (dataH[i][idHojaCol] && dataH[i][idHojaCol].toString().toUpperCase().trim() === searchHId) {
-                  sheetH.getRange(i + 1, urlDiagCol + 1).setValue(finalDiagUrl);
-                  break;
-                }
-              }
+            let uCol = headersH.indexOf("url_diagnostico");
+            if (uCol === -1) uCol = headersH.indexOf("firmaurl"); // Fallback a columna vieja
+            if (uCol === -1) { 
+              uCol = headersH.length; 
+              sheetH.getRange(1, uCol + 1).setValue("URL_Diagnostico"); 
             }
-          } catch(eUrl) { logDebug("ERR_PERSIST_DIAG_URL", eUrl.toString()); }
+            
+            for (let i = 1; i < dH.length; i++) { 
+              if (dH[i][idCol] && dH[i][idCol].toString().toUpperCase().trim() === payload.id_hoja.toString().toUpperCase().trim()) { 
+                sheetH.getRange(i + 1, uCol + 1).setValue(finalDiagUrl); 
+                break; 
+              } 
+            }
+          }
         }
       }
     }

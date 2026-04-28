@@ -39,14 +39,14 @@ export default function AsesoriaAcompanamientoDashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [clientsRes, hojasRes, resGestiones] = await Promise.all([
+      const [clientsRes, hojasRes, u2Res] = await Promise.all([
         callGAS('GET_DATA', { sheetName: 'CLIENTES' }),
         callGAS('GET_DATA', { sheetName: 'HOJAS_SERVICIO' }),
         callGAS('GET_DATA', { sheetName: 'GESTIONES_U2' })
       ]);
       if (clientsRes?.success) setClients(clientsRes.data);
       if (hojasRes?.success) setHojas(hojasRes.data);
-      if (resGestiones?.success) setGestionesU2(resGestiones.data);
+      if (u2Res?.success) setGestionesU2(u2Res.data);
     } catch (err) {
       console.error("Error fetching advisory data", err);
     } finally {
@@ -67,23 +67,22 @@ export default function AsesoriaAcompanamientoDashboard() {
     if (!clientId) return null;
     const idUpper = String(clientId).toUpperCase().trim();
     
-    // 1. Buscar en HOJAS_SERVICIO (Asegurando que el registro SÍ tenga URL)
-    const hoja: any = hojas.find((h: any) => 
-      String(h.id_cliente || h.clienteid || h.idcliente || h.id || '').toUpperCase().trim() === idUpper &&
-      (h.url_diagnostico || h.urldiagnostico || (h as any).urldiagnóstico || h.firmaurl)
-    );
-    if (hoja) {
-      return hoja.url_diagnostico || hoja.urldiagnostico || (hoja as any).urldiagnóstico || hoja.firmaurl;
-    }
+    // Función de seguridad: solo retorna true si es una URL válida
+    const isValidUrl = (url: any) => typeof url === 'string' && url.startsWith('http');
 
-    // 2. Buscar en GESTIONES_U2 (Asegurando que el registro SÍ tenga URL)
-    const gestion: any = gestionesU2.find((g: any) => 
-      String(g.clienteid || g.id_cliente || g.idcliente || g.id || '').toUpperCase().trim() === idUpper &&
-      (g.url_diagnostico || g.urldiagnostico || (g as any).urldiagnóstico || g.firmaurl)
+    // 1. Buscar en HOJAS_SERVICIO
+    const hoja = hojas.find((h: any) => 
+      String(h.id_cliente || h.clienteid || h.idcliente || h.id || '').toUpperCase().trim() === idUpper &&
+      (isValidUrl(h.url_diagnostico) || isValidUrl(h.urldiagnostico) || isValidUrl(h.urldiagnóstico) || isValidUrl(h.firmaurl))
     );
-    if (gestion) {
-      return gestion.url_diagnostico || gestion.urldiagnostico || (gestion as any).urldiagnóstico || gestion.firmaurl;
-    }
+    if (hoja) return hoja.url_diagnostico || hoja.urldiagnostico || hoja.urldiagnóstico || hoja.firmaurl;
+
+    // 2. Buscar en GESTIONES_U2
+    const gestion = gestionesU2.find((g: any) => 
+      String(g.clienteid || g.id_cliente || g.idcliente || g.id || '').toUpperCase().trim() === idUpper &&
+      (isValidUrl(g.url_diagnostico) || isValidUrl(g.urldiagnostico) || isValidUrl(g.urldiagnóstico) || isValidUrl(g.firmaurl))
+    );
+    if (gestion) return gestion.url_diagnostico || gestion.urldiagnostico || gestion.urldiagnóstico || gestion.firmaurl;
 
     return null;
   };
