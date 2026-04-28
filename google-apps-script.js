@@ -362,6 +362,25 @@ function handleFinalizeAudit(payload) {
     }
   } catch(e) { logDebug("ERR_DOC_GEN_MAIN", e.toString()); }
 
+  // --- ACTUALIZAR ESTATUS DE AUDITORIA A FINALIZADA ---
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheetClientes = ss.getSheetByName("CLIENTES");
+    const dataClientes = sheetClientes.getDataRange().getValues();
+    const headersClientes = dataClientes[0].map(h => h.toString().toLowerCase().trim());
+    const audCol = headersClientes.indexOf("estadoauditoria") !== -1 ? headersClientes.indexOf("estadoauditoria") : headersClientes.indexOf("estado auditoría");
+    const idCol = headersClientes.indexOf("id");
+    
+    for (let i = 1; i < dataClientes.length; i++) {
+      if (dataClientes[i][idCol] && dataClientes[i][idCol].toString().toUpperCase().trim() === searchId.toString().toUpperCase().trim()) {
+        if (audCol !== -1) {
+          sheetClientes.getRange(i + 1, audCol + 1).setValue("AUDITORIA_FINALIZADA");
+        }
+        break;
+      }
+    }
+  } catch(e) {}
+
   return createResponse({ success: true });
 }
 

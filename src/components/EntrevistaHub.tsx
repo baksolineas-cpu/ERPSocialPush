@@ -172,6 +172,20 @@ export default function EntrevistaHub() {
   }, [data.curp, data.id]);
 
 
+  const [promotores, setPromotores] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchPromotores = async () => {
+      try {
+        const res = await callGAS('GET_DATA', { sheetName: 'PROMOTORES' });
+        if (res?.success) setPromotores(res.data);
+      } catch (err) {
+        console.warn("Failed to fetch Promotores", err);
+      }
+    };
+    fetchPromotores();
+  }, []);
+
   const [hojaServicio, setHojaServicio] = useState<{
     servicios: { nombre: string; universo: 'U1' | 'U2'; precio: number }[];
     universo: 'U1' | 'U2';
@@ -1348,13 +1362,32 @@ export default function EntrevistaHub() {
                     <h5 className="text-[10px] font-black uppercase text-white/60 tracking-widest">Origen del Cliente (Migración)</h5>
                   </div>
                   
-                  <AuditoriaInput 
-                    onBlur={handleAutoSave} 
-                    registrarAccion={registrarAccion} 
-                    label="Nombre del Promotor" 
-                    value={data.promotor} 
-                    onChange={(v:any)=>updateData({promotor:v})} 
-                  />
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center px-1">
+                      <label className="text-[10px] font-black text-white/40 uppercase tracking-widest">Nombre del Promotor</label>
+                      {lockedFields.has('promotor') && <ShieldCheck size={14} className="text-emerald-400" />}
+                    </div>
+                    <select
+                      value={data.promotor || ""}
+                      onChange={(e) => {
+                         updateData({ promotor: e.target.value });
+                         registrarAccion(`Promotor asignado: ${e.target.value}`);
+                         handleAutoSave();
+                      }}
+                      className={cn(
+                        "w-full px-5 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-sm font-bold text-white transition-all outline-none focus:border-[#DAA520]/50 appearance-none",
+                        lockedFields.has('promotor') && "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 cursor-not-allowed"
+                      )}
+                      disabled={lockedFields.has('promotor')}
+                    >
+                      <option value="" className="text-slate-800">Sin Promotor</option>
+                      {promotores.map((p, idx) => (
+                        <option key={idx} value={p.nombre || p.Nombre} className="text-slate-800">
+                          {p.nombre || p.Nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-1">Estatus de Comisión</label>

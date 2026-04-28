@@ -32,17 +32,39 @@ export default function Layout({ children }: LayoutProps) {
   const { user, loading, logout, login } = useAuth();
 
   const navigation = [
-    { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['Admin'] },
-    { name: 'Entrevista Hub', href: '/entrevista', icon: Activity, roles: ['Admin', 'Promoción'] },
-    { name: 'Asesoría', href: '/asesoria', icon: Megaphone, roles: ['Admin', 'Promoción'] },
-    { name: 'Operaciones', href: '/operaciones', icon: Briefcase, roles: ['Admin'] },
-    { name: 'Tesorería', href: '/tesoreria', icon: DollarSign, roles: ['Admin'] },
-    { name: 'Contabilidad', href: '/contabilidad', icon: BookOpen, roles: ['Admin'] },
-    { name: 'Capital Humano', href: '/capital-humano', icon: Users, roles: ['Admin', 'Capital Humano'] },
-    { name: 'Administración', href: '/admin', icon: Settings, roles: ['Admin'] },
+    { name: 'Dashboard', href: '/', roles: ['Admin'] },
+    { name: 'Entrevista Hub', href: '/entrevista', roles: ['Admin', 'Asesoria', 'Operaciones', 'Capital Humano', 'Tesoreria', 'Contabilidad'] },
+    { name: 'Asesoría', href: '/asesoria', roles: ['Admin', 'Asesoria'] },
+    { name: 'Operaciones', href: '/operaciones', roles: ['Admin', 'Operaciones'] },
+    { name: 'Tesorería', href: '/tesoreria', roles: ['Admin', 'Tesoreria'] },
+    { name: 'Contabilidad', href: '/contabilidad', roles: ['Admin', 'Contabilidad'] },
+    { name: 'Capital Humano', href: '/capital-humano', roles: ['Admin', 'Capital Humano'] },
+    { name: 'Administración', href: '/admin', roles: ['Admin'] },
   ];
 
-  const filteredNavigation = navigation.filter(item => item.roles.includes(user?.role || ''));
+  const checkAccess = (allowedRoles: string[]) => {
+    if (!user) return false;
+    const roleLower = user.role?.toLowerCase() || '';
+    const roleNormalized = roleLower.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    if (roleNormalized === 'admin') return true;
+    return allowedRoles.some(allowed => {
+      const allowedNormalized = allowed.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      return roleNormalized === allowedNormalized;
+    });
+  };
+
+  const filteredNavigation = navigation.filter(item => checkAccess(item.roles)).map(item => {
+    // We add icons back by name matching
+    let icon = LayoutDashboard;
+    if (item.name === 'Entrevista Hub') icon = Activity;
+    if (item.name === 'Asesoría') icon = Megaphone;
+    if (item.name === 'Operaciones') icon = Briefcase;
+    if (item.name === 'Tesorería') icon = DollarSign;
+    if (item.name === 'Contabilidad') icon = BookOpen;
+    if (item.name === 'Capital Humano') icon = Users;
+    if (item.name === 'Administración') icon = Settings;
+    return { ...item, icon };
+  });
 
   if (loading) {
     return (

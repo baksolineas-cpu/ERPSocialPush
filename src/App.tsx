@@ -35,6 +35,20 @@ function AppRoutes() {
 
   const isInterviewRoute = location.pathname === '/entrevista';
 
+  const checkAccess = (allowedRoles: string[]) => {
+    if (!user) return false;
+    const roleLower = user.role?.toLowerCase() || '';
+    const roleNormalized = roleLower.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    
+    // Always grant access to Admin
+    if (roleNormalized === 'admin') return true;
+
+    return allowedRoles.some(allowed => {
+      const allowedNormalized = allowed.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      return roleNormalized === allowedNormalized;
+    });
+  };
+
   return (
     <Routes>
       {/* Vista del Cliente (Sin Layout) */}
@@ -50,17 +64,17 @@ function AppRoutes() {
         user ? (
           <Layout>
             <Routes>
-              <Route path="/" element={user.role === 'Admin' ? <Dashboard /> : <Navigate to="/entrevista" />} />
+              <Route path="/" element={checkAccess(['admin']) ? <Dashboard /> : <Navigate to="/entrevista" />} />
               <Route path="/entrevista" element={<EntrevistaHub />} />
-              <Route path="/asesoria" element={<AsesoriaAcompanamientoDashboard />} />
-              <Route path="/operaciones" element={user.role === 'Admin' ? <OperacionesDashboard /> : <Navigate to="/entrevista" />} />
-              <Route path="/tesoreria" element={user.role === 'Admin' ? <TesoreriaDashboard /> : <Navigate to="/entrevista" />} />
-              <Route path="/contabilidad" element={user.role === 'Admin' ? <ContabilidadDashboard /> : <Navigate to="/entrevista" />} />
-              <Route path="/capital-humano" element={user.role === 'Admin' || user.role === 'Capital Humano' ? <CapitalHumanoDashboard /> : <Navigate to="/entrevista" />} />
-              <Route path="/admin" element={user.role === 'Admin' ? <AdminPanel /> : <Navigate to="/entrevista" />} />
+              <Route path="/asesoria" element={checkAccess(['asesoria', 'admin']) ? <AsesoriaAcompanamientoDashboard /> : <Navigate to="/entrevista" />} />
+              <Route path="/operaciones" element={checkAccess(['operaciones', 'admin']) ? <OperacionesDashboard /> : <Navigate to="/entrevista" />} />
+              <Route path="/tesoreria" element={checkAccess(['tesoreria', 'admin']) ? <TesoreriaDashboard /> : <Navigate to="/entrevista" />} />
+              <Route path="/contabilidad" element={checkAccess(['contabilidad', 'admin']) ? <ContabilidadDashboard /> : <Navigate to="/entrevista" />} />
+              <Route path="/capital-humano" element={checkAccess(['capital humano', 'admin']) ? <CapitalHumanoDashboard /> : <Navigate to="/entrevista" />} />
+              <Route path="/admin" element={checkAccess(['admin']) ? <AdminPanel /> : <Navigate to="/entrevista" />} />
               <Route path="/clientes" element={<Clientes />} />
-              <Route path="/hojas" element={user.role === 'Admin' ? <HojasDeServicio /> : <Navigate to="/entrevista" />} />
-              <Route path="/gestion" element={user.role === 'Admin' ? <GestionU2 /> : <Navigate to="/entrevista" />} />
+              <Route path="/hojas" element={checkAccess(['admin']) ? <HojasDeServicio /> : <Navigate to="/entrevista" />} />
+              <Route path="/gestion" element={checkAccess(['admin']) ? <GestionU2 /> : <Navigate to="/entrevista" />} />
             </Routes>
             {isInterviewRoute && <AISidebar context={{ user, currentCase }} />}
           </Layout>
