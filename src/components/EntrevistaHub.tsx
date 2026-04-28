@@ -216,7 +216,7 @@ export default function EntrevistaHub() {
 
   const classifyUniverse = (servicio: string): 'U1' | 'U2' => {
     const s = servicio.toLowerCase();
-    if (s.includes('modalidad 40') || s.includes('pti') || s.includes('modalidad 10')) {
+    if (s.includes('modalidad') || s.includes('pti')) {
       return 'U2';
     }
     return 'U1';

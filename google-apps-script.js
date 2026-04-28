@@ -388,7 +388,21 @@ function handleFinalizeAudit(payload) {
           if (DIAGNOSTICO_TEMPLATE_ID && !DIAGNOSTICO_TEMPLATE_ID.includes("placeholder")) {
             const diagTemplateDoc = DriveApp.getFileById(DIAGNOSTICO_TEMPLATE_ID);
             const newDiagFile = diagTemplateDoc.makeCopy("DIAGNOSTICO_CERTIFICADO_" + searchIdClean, folder);
-            if (newDiagFile) finalDiagUrl = newDiagFile.getUrl();
+            if (newDiagFile) {
+              const doc = DocumentApp.openById(newDiagFile.getId());
+              const body = doc.getBody();
+              body.replaceText("{{nombre_cliente}}", cliente.nombre || "");
+              body.replaceText("{{NOMBRE_CLIENTE}}", cliente.nombre || "");
+              body.replaceText("{{CURP}}", cliente.curp || "");
+              doc.saveAndClose();
+              Utilities.sleep(2000);
+              
+              const pdfFile = folder.createFile(newDiagFile.getAs('application/pdf')).setName(`DIAGNOSTICO_CERTIFICADO_${searchIdClean}.pdf`);
+              pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+              finalDiagUrl = pdfFile.getUrl();
+              
+              newDiagFile.setTrashed(true);
+            }
           } else {
              // Modificado para retornar URL de PDF y auto-limpiar
              finalDiagUrl = generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja, payload.montoU2);
@@ -648,9 +662,10 @@ function handleGetClienteStatus(payload) {
     if (!identifier) return createResponse({ status: 'error', message: 'ID Requerido' }, 400);
     
     const clientes = getSheetData("CLIENTES");
+    const identifierUpper = identifier.toString().toUpperCase().trim();
     const cliente = clientes.find(c => 
-      (c.id && c.id.toString().toUpperCase() === identifier.toString().toUpperCase()) || 
-      (c.curp && c.curp.toString().toUpperCase() === identifier.toString().toUpperCase())
+      (c.id && c.id.toString().toUpperCase().trim() === identifierUpper) || 
+      (c.curp && c.curp.toString().toUpperCase().trim() === identifierUpper)
     );
     
     if (cliente) {
@@ -663,9 +678,12 @@ function handleGetClienteStatus(payload) {
           while (files.hasNext()) {
             const f = files.next();
             const name = f.getName().toUpperCase();
-            if (name.includes("INE")) cliente.ine_url = f.getUrl();
-            if (name.includes("FISCAL") || name.includes("CSF")) cliente.csf_url = f.getUrl();
-            // ... otros mapeos si son críticos, pero los más importantes están en doGet
+            const url = f.getUrl();
+            
+            if (name.includes("INE")) cliente.ine_url = url;
+            if (name.includes("FISCAL") || name.includes("CSF")) cliente.csf_url = url;
+            if (name.startsWith("CONTRATO_MARCO")) cliente.contrato_url = url;
+            if (name.startsWith("DIAGNOSTICO_CERTIFICADO")) cliente.diagnostico_url = url;
           }
         } catch(e) {}
       }
@@ -683,6 +701,7 @@ function handleGetClienteStatus(payload) {
         if (hoja) {
           cliente.hojaservicio = hoja;
           cliente.montoTotal = hoja.honorarios || "0.00";
+          if (hoja.url_diagnostico) cliente.diagnostico_url = hoja.url_diagnostico;
         }
       } catch(e) {}
 
@@ -692,6 +711,16 @@ function handleGetClienteStatus(payload) {
   } catch(e) {
     return createResponse({ status: 'error', error: e.toString() }, 500);
   }
+}
+
+function getNextEmptyRow(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow === 0) return 1;
+  const colA = sheet.getRange(1, 1, lastRow + 10, 1).getValues();
+  for (let i = 0; i < colA.length; i++) {
+    if (!colA[i][0]) return i + 1;
+  }
+  return lastRow + 1;
 }
 
 function handleCreateCliente(payload) {
@@ -890,7 +919,8 @@ function handleCreateHoja(payload) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const searchHojaId = (payload.id_hoja || Utilities.getUuid()).toString().toUpperCase().trim();
-    const searchClienteId = (payload.clienteId || payload.id || "").toString().toUpperCase().trim();
+    const rawCid = (payload.clienteId || payload.id || "").toString().replace("NEW_", "");
+    const searchClienteId = rawCid.substring(0, 10).toUpperCase();
 
     let isMigracion = (payload.origen && (payload.origen.toLowerCase().includes('socio') || payload.origen.toLowerCase().includes('migra'))) || payload.esMigracion || payload.isMigracion;
     let tienePromotor = (payload.promotor && payload.promotor.trim() !== '') ? true : false;
@@ -1011,17 +1041,7 @@ function handleCreateHoja(payload) {
 
     if (rowIndexU1 > -1) sheetU1Obj.sheet.getRange(rowIndexU1 + 1, 1, 1, rowDataU1.length).setValues([rowDataU1]);
     else {
-      // Buscar primera fila realmente vacía
-      const lastRow = sheetU1Obj.sheet.getLastRow();
-      let nextRow = lastRow + 1;
-      if (lastRow > 0) {
-        const lastCell = sheetU1Obj.sheet.getRange(lastRow, 1).getValue();
-        if (!lastCell) {
-          // Retroceder para encontrar si hay vacíos previos
-          const colA = sheetU1Obj.sheet.getRange(1, 1, lastRow, 1).getValues();
-          for(let r=0; r<colA.length; r++) { if(!colA[r][0]) { nextRow = r+1; break; } }
-        }
-      }
+      const nextRow = getNextEmptyRow(sheetU1Obj.sheet);
       sheetU1Obj.sheet.getRange(nextRow, 1, 1, rowDataU1.length).setValues([rowDataU1]);
     }
 
@@ -1048,7 +1068,7 @@ function handleCreateHoja(payload) {
       let montoU2 = parseFloat(payload.montoU2 || payload.monto || 0);
 
       // MOTOR MATEMÁTICO U2
-      let honorariosFijos = 1500;
+      let honorariosFijos = 0; // Reset a 0 por directiva
       let cuotaIMSS = 0;
       let subU2 = 0, ivaAbsorbidoU2 = 0, ivaCobradoU2 = 0, pagoPromotorU2 = 0, utilidadBrutaU2 = 0;
 
@@ -1090,13 +1110,7 @@ function handleCreateHoja(payload) {
 
       if (rowIndexU2 > -1) sheetU2Obj.sheet.getRange(rowIndexU2 + 1, 1, 1, rowDataU2.length).setValues([rowDataU2]);
       else {
-        // Buscar primera fila realmente vacía en U2
-        const lastRowU2 = sheetU2Obj.sheet.getLastRow();
-        let nextRowU2 = lastRowU2+1;
-        if (lastRowU2 > 0) {
-           const colAU2 = sheetU2Obj.sheet.getRange(1, 1, lastRowU2, 1).getValues();
-           for(let r=0; r<colAU2.length; r++) { if(!colAU2[r][0]) { nextRowU2 = r+1; break; } }
-        }
+        const nextRowU2 = getNextEmptyRow(sheetU2Obj.sheet);
         sheetU2Obj.sheet.getRange(nextRowU2, 1, 1, rowDataU2.length).setValues([rowDataU2]);
       }
     }
