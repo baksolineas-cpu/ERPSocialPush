@@ -678,7 +678,7 @@ function handleGetClienteStatus(payload) {
           while (files.hasNext()) {
             const f = files.next();
             const name = f.getName().toUpperCase();
-            const url = f.getUrl();
+            const url = f.getDownloadUrl() || f.getUrl();
             
             if (name.includes("INE")) cliente.ine_url = url;
             if (name.includes("FISCAL") || name.includes("CSF")) cliente.csf_url = url;
@@ -713,14 +713,12 @@ function handleGetClienteStatus(payload) {
   }
 }
 
-function getNextEmptyRow(sheet) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow === 0) return 1;
-  const colA = sheet.getRange(1, 1, lastRow + 10, 1).getValues();
-  for (let i = 0; i < colA.length; i++) {
-    if (!colA[i][0]) return i + 1;
-  }
-  return lastRow + 1;
+function getNextEmptyRow(sheet) { 
+  const values = sheet.getRange('A:A').getValues(); 
+  for (var i = 0; i < values.length; i++) { 
+    if (!values[i][0]) return i + 1; 
+  } 
+  return values.length + 1; 
 }
 
 function handleCreateCliente(payload) {
@@ -900,7 +898,8 @@ function handleCreateCliente(payload) {
     if (existingRowIndex > -1) {
       sheet.getRange(existingRowIndex + 1, 1, 1, rowData.length).setValues([rowData]);
     } else {
-      sheet.appendRow(rowData);
+      const nextRow = getNextEmptyRow(sheet);
+      sheet.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
     }
 
     return createResponse({ success: true, id: curp10, id_carpeta_drive: folderId });

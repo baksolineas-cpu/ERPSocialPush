@@ -670,14 +670,16 @@ export default function EntrevistaHub() {
     const u2Services = hojaServicio.servicios.filter(s => s.universo === 'U2');
     const u1Services = hojaServicio.servicios.filter(s => s.universo === 'U1');
     
-    const serviciosU2 = u2Services.map(s => s.nombre).join(', ');
+    const getFinalName = (s: any) => s.nombre === 'Otro' ? (hojaServicio.otroServicioTexto || 'Otros Servicios') : s.nombre;
+
+    const serviciosU2 = u2Services.map(getFinalName).join(', ');
     const montoU2 = u2Services.reduce((sum, s) => sum + (s.precio || 0), 0);
     
-    const serviciosU1 = u1Services.map(s => s.nombre).join(', ');
+    const serviciosU1 = u1Services.map(getFinalName).join(', ');
     const montoU1 = u1Services.reduce((sum, s) => sum + (s.precio || 0), 0);
 
     const serviciosFinales = hojaServicio.servicios.map(s => {
-      const nombre = s.nombre === 'Otro' ? hojaServicio.otroServicioTexto : s.nombre;
+      const nombre = getFinalName(s);
       return `${nombre} (${s.universo})`;
     });
 
