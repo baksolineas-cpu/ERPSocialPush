@@ -36,7 +36,7 @@ export default function AsesoriaAcompanamientoDashboard() {
     try {
       const [clientsRes, hojasRes] = await Promise.all([
         callGAS('GET_DATA', { sheetName: 'CLIENTES' }),
-        callGAS('GET_DATA', { sheetName: 'HOJA_SERVICIO' })
+        callGAS('GET_DATA', { sheetName: 'HOJAS_SERVICIO' })
       ]);
       if (clientsRes?.success) setClients(clientsRes.data);
       if (hojasRes?.success) setHojas(hojasRes.data);

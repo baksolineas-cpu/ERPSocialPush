@@ -283,28 +283,7 @@ function handleFinalizeAudit(payload) {
 
         // B. GENERACIÓN DE DIAGNÓSTICO CERTIFICADO
         const diagUrl = generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja);
-        
-        // PERSISTENCIA DE URL EN HOJAS_SERVICIO
-        if (diagUrl && payload.id_hoja) {
-          try {
-            const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-            const sheetH = ss.getSheetByName("HOJAS_SERVICIO");
-            const dataH = sheetH.getDataRange().getValues();
-            const headersH = dataH[0].map(h => h.toString().toLowerCase().trim());
-            const idHojaCol = headersH.indexOf("id_hoja") !== -1 ? headersH.indexOf("id_hoja") : headersH.indexOf("id");
-            const urlDiagCol = headersH.indexOf("url_diagnostico");
-            
-            if (urlDiagCol !== -1) {
-              const searchHId = payload.id_hoja.toString().toUpperCase().trim();
-              for (let i = 1; i < dataH.length; i++) {
-                if (dataH[i][idHojaCol] && dataH[i][idHojaCol].toString().toUpperCase().trim() === searchHId) {
-                  sheetH.getRange(i + 1, urlDiagCol + 1).setValue(diagUrl);
-                  break;
-                }
-              }
-            }
-          } catch(eUrl) { logDebug("ERR_PERSIST_DIAG_URL", eUrl.toString()); }
-        }
+        let finalDiagUrl = diagUrl;
 
         // C. AUTO-SELLADO (Upsell Logic)
         // Si el cliente ya tiene firma y selfie en su folder, sellamos el diagnóstico inmediatamente
@@ -341,10 +320,41 @@ function handleFinalizeAudit(payload) {
               const pdfBlob = docFile.getAs('application/pdf');
               const pdfFile = folder.createFile(pdfBlob).setName(docFile.getName() + "_AUTO_FIRMADO_" + transactionId + ".pdf");
               pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+              finalDiagUrl = pdfFile.getUrl();
               
               docFile.setTrashed(true);
               logDebug("AUTO_SEALING_COMPLETE", "Diagnóstico sellado con éxito: " + pdfFile.getUrl());
            }
+        }
+
+        // PERSISTENCIA DE URL EN HOJAS_SERVICIO O GESTIONES_U2
+        if (finalDiagUrl && payload.id_hoja) {
+          try {
+            const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+            const sheetName = payload.universo === 'U2' ? "GESTIONES_U2" : "HOJAS_SERVICIO";
+            let sheetH = ss.getSheetByName(sheetName);
+            // Backup por si acaso
+            if (!sheetH) sheetH = ss.getSheetByName("HOJAS_SERVICIO");
+            if (sheetH) {
+              const dataH = sheetH.getDataRange().getValues();
+              const headersH = dataH[0].map(h => h.toString().toLowerCase().trim());
+              const idHojaCol = headersH.indexOf("id_hoja") !== -1 ? headersH.indexOf("id_hoja") : headersH.indexOf("id");
+              let urlDiagCol = headersH.indexOf("url_diagnostico");
+              
+              if (urlDiagCol === -1) {
+                urlDiagCol = headersH.length;
+                sheetH.getRange(1, urlDiagCol + 1).setValue("URL_Diagnostico");
+              }
+  
+              const searchHId = payload.id_hoja.toString().toUpperCase().trim();
+              for (let i = 1; i < dataH.length; i++) {
+                if (dataH[i][idHojaCol] && dataH[i][idHojaCol].toString().toUpperCase().trim() === searchHId) {
+                  sheetH.getRange(i + 1, urlDiagCol + 1).setValue(finalDiagUrl);
+                  break;
+                }
+              }
+            }
+          } catch(eUrl) { logDebug("ERR_PERSIST_DIAG_URL", eUrl.toString()); }
         }
       }
     }
@@ -384,7 +394,9 @@ function generateDiagnosticPDF(clientData, servicesData, montoTotal, asesorName,
 
     // 4. VALOR TOTAL & CLÁUSULA
     body.appendParagraph("\nIII. VALOR TOTAL DEL PROYECTO:").setBold(true);
-    body.appendParagraph(`Inversión Total Acordada: $${Number(montoTotal || 0).toLocaleString('es-MX', {minimumFractionDigits:2})} MXN`);
+    body.appendParagraph(`Monto para Servicios Individuales (U1): $${Number(montoTotal || 0).toLocaleString('es-MX', {minimumFractionDigits:2})} - Depositar en Cuenta Honorarios [Datos Bancarios]`);
+    body.appendParagraph(`Monto para Servicios Integrales (U2): $${Number(montoTotal || 0).toLocaleString('es-MX', {minimumFractionDigits:2})} - Depositar en Cuenta Concentradora [Datos Bancarios]`);
+    body.appendParagraph(`Favor de incluir su ID ${clientData.curp || clientData.id || "SP-2024"} en el concepto de su transferencia.`);
     
     body.appendParagraph("\nIV. CLÁUSULA DE PRIVACIDAD Y VALIDEZ:").setBold(true);
     body.appendParagraph("Este Diagnóstico Técnico de Viabilidad de Derechos se emite bajo los estándares de materialidad fiscal de BAKSO, S.C. La identidad del solicitante ha sido validada mediante biometría facial (Selfie) y firma autógrafa digital, vinculando el presente dictamen al expediente único de cliente en nuestra bóveda de seguridad social.").setAttributes({[DocumentApp.Attribute.FONT_SIZE]: 8, [DocumentApp.Attribute.ITALIC]: true});
@@ -733,27 +745,133 @@ function handleCreateHoja(payload) {
   
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    let sheet = ss.getSheetByName("HOJAS_SERVICIO");
+    
+    const searchHojaId = (payload.id_hoja || Utilities.getUuid()).toString().toUpperCase().trim();
+    const searchClienteId = (payload.clienteId || payload.id || "").toString().toUpperCase().trim();
+    const isU2 = payload.universo === 'U2' || (payload.serviciosU2 && payload.montoU2 > 0);
+    
+    // Extracción de datos del cliente para motor matemático e inteligencia de carpetas
+    let isMigracion = (payload.origen && (payload.origen.toLowerCase().includes('socio') || payload.origen.toLowerCase().includes('migra'))) || payload.esMigracion || payload.isMigracion;
+    let tienePromotor = (payload.promotor && payload.promotor.trim() !== '') ? true : false;
+    let folderId = payload.id_carpeta_drive;
+
+    try {
+      const clientesSheet = ss.getSheetByName("CLIENTES");
+      if (clientesSheet) {
+        const cData = clientesSheet.getDataRange().getValues();
+        const cHeaders = cData[0].map(h => h.toString().toLowerCase().trim());
+        const cIdCol = cHeaders.indexOf("id");
+        const cCurpCol = cHeaders.indexOf("curp");
+        const cOrigenCol = cHeaders.indexOf("origen");
+        const cPromotorCol = cHeaders.indexOf("promotor");
+        const cFolderCol = cHeaders.indexOf("id_carpeta_drive") !== -1 ? cHeaders.indexOf("id_carpeta_drive") : cHeaders.indexOf("idcarpetadrive");
+        
+        for(let i=1; i<cData.length; i++) {
+          const id = cData[i][cIdCol] ? cData[i][cIdCol].toString().toUpperCase().trim() : "";
+          const curp = cData[i][cCurpCol] ? cData[i][cCurpCol].toString().toUpperCase().trim() : "";
+          if (searchClienteId !== "" && (id === searchClienteId || curp === searchClienteId)) {
+            if (!isMigracion && cOrigenCol !== -1 && cData[i][cOrigenCol] && cData[i][cOrigenCol].toString().toLowerCase().includes('socio')) {
+              isMigracion = true;
+            }
+            if (!tienePromotor && cPromotorCol !== -1 && cData[i][cPromotorCol] && cData[i][cPromotorCol].toString().trim() !== '') {
+              tienePromotor = true;
+            }
+            if (!folderId && cFolderCol !== -1) {
+              folderId = cData[i][cFolderCol];
+            }
+            break;
+          }
+        }
+      }
+    } catch(e) {}
+    
+    // Motor Matemático
+    let honorariosIn = parseFloat(payload.montoAcordado || payload.honorariosAcordados || payload.monto || payload.montoU2 || 0);
+    let honorarios = honorariosIn;
+    let subtotal = 0, ivaAbsorbido = 0, ivaCobrado = 0, pagoPromotor = 0, utilidadBruta = 0;
+    
+    if (isMigracion) {
+        honorarios = 1500;
+        subtotal = honorarios / 1.16;
+        ivaAbsorbido = honorarios - subtotal;
+        ivaCobrado = 0;
+        pagoPromotor = tienePromotor ? 100 : 0;
+        utilidadBruta = honorarios - ivaAbsorbido - pagoPromotor;
+    } else {
+        if (!isU2 || honorarios === 0) {
+            honorarios = 1500 * 1.16; // Cliente Nuevo Honorarios Base 
+        }
+        subtotal = honorarios / 1.16;
+        ivaAbsorbido = 0;
+        ivaCobrado = honorarios - subtotal;
+        pagoPromotor = 0;
+        utilidadBruta = subtotal;
+    }
+    
+    // Actualizar payload para que generateDiagnosticPDF use el valor exacto
+    payload.montoAcordado = honorarios;
+    payload.monto = honorarios;
+    payload.honorariosAcordados = honorarios;
+
+    // Inteligencia de Carpetas (Subcarpetas U2)
+    if (isU2 && folderId) {
+      try {
+        const folder = DriveApp.getFolderById(folderId);
+        const nameLC = `${searchClienteId}_LC`;
+        const nameCI = `${searchClienteId}_CI`;
+        const folders = folder.getFolders();
+        let hasLC = false, hasCI = false;
+        while(folders.hasNext()) {
+          let f = folders.next();
+          if (f.getName() === nameLC) hasLC = true;
+          if (f.getName() === nameCI) hasCI = true;
+        }
+        if (!hasLC) folder.createFolder(nameLC);
+        if (!hasCI) folder.createFolder(nameCI);
+      } catch(e) {}
+    }
+
+    let serviciosStr = "";
+    if (Array.isArray(payload.servicios)) serviciosStr = payload.servicios.join(", ");
+    else serviciosStr = payload.servicios || payload.serviciosU2 || "";
+
+    // Separación U1/U2 Exclusiva
+    const targetSheetName = isU2 ? "GESTIONES_U2" : "HOJAS_SERVICIO";
+    let sheet = ss.getSheetByName(targetSheetName);
+    
     if (!sheet) {
-      sheet = ss.insertSheet("HOJAS_SERVICIO");
-      sheet.appendRow(["ID_Hoja", "ID_Cliente", "Universo", "Servicios", "Monto", "Diagnostico", "Status", "Fecha", "Asesor", "FirmaAsesor", "NotasExtra", "URL_Diagnostico"]);
+      sheet = ss.insertSheet(targetSheetName);
+      if (isU2) {
+        sheet.appendRow(["ID", "ClienteID", "Mes", "Estatus", "Recibido", "IMSS", "Honorarios", "ComprobanteIMSS", "FacturaHonorarios", "UpdatedAt", "Servicios_U2", "URL_Diagnostico", "Subtotal", "IVA_Absorbido", "IVA_Cobrado", "Pago_Promotor", "Utilidad_Bruta"]);
+      } else {
+        sheet.appendRow(["ID_Hoja", "ID_Cliente", "Universo", "Servicios", "Monto", "Diagnostico", "Status", "Fecha", "Asesor", "FirmaAsesor", "NotasExtra", "URL_Diagnostico", "Subtotal", "IVA_Absorbido", "IVA_Cobrado", "Pago_Promotor", "Utilidad_Bruta"]);
+      }
     }
     
     const data = sheet.getDataRange().getValues();
     const headers = data[0].map(h => h.toString().toLowerCase().trim());
     
-    // Fix: Soportar tanto 'id_hoja' como 'id' en el encabezado (Fallback a Columna A)
+    // Add dynamic columns if they don't exist
+    const financialCols = ["Subtotal", "IVA_Absorbido", "IVA_Cobrado", "Pago_Promotor", "Utilidad_Bruta"];
+    financialCols.forEach(col => {
+      let lc = col.toLowerCase();
+      if (headers.indexOf(lc) === -1) {
+        headers.push(lc);
+        sheet.getRange(1, headers.length).setValue(col);
+      }
+    });
+
+    // Check U_Diagnostico Column (Added safely)
+    if (headers.indexOf("url_diagnostico") === -1) {
+      headers.push("url_diagnostico");
+      sheet.getRange(1, headers.length).setValue("URL_Diagnostico");
+    }
+    
     let idHojaCol = headers.indexOf("id_hoja");
     if (idHojaCol === -1) idHojaCol = headers.indexOf("id");
     if (idHojaCol === -1) idHojaCol = 0; 
     
-    // Soportar variantes del ID de cliente
-    let idClienteCol = headers.indexOf("id_cliente");
-    if (idClienteCol === -1) idClienteCol = headers.indexOf("clienteid");
-    
-    // Búsqueda de registro existente (Upsert) por ID_Hoja
     let rowIndex = -1;
-    const searchHojaId = (payload.id_hoja || "").toString().toUpperCase().trim();
     if (searchHojaId) {
       for (let i = 1; i < data.length; i++) {
         if (data[i][idHojaCol] && data[i][idHojaCol].toString().toUpperCase().trim() === searchHojaId) {
@@ -762,82 +880,57 @@ function handleCreateHoja(payload) {
         }
       }
     }
-    
-    const searchClienteId = (payload.clienteId || payload.id || "").toString().toUpperCase().trim();
-    
-    // BLINDAJE: servicios puede venir como Array o como String ya unido
-    let serviciosStr = "";
-    if (Array.isArray(payload.servicios)) {
-      serviciosStr = payload.servicios.join(", ");
-    } else {
-      serviciosStr = payload.servicios || "";
+
+    const rowData = new Array(headers.length).fill("");
+    if (rowIndex > -1) {
+      let existingRow = data[rowIndex];
+      for (let j = 0; j < existingRow.length; j++) rowData[j] = existingRow[j];
     }
     
-    const rowData = [
-      searchHojaId || Utilities.getUuid(),                      // A: ID_Hoja
-      searchClienteId,                                          // B: ID_Cliente
-      payload.universo || "U1/U2",                              // C: Universo
-      serviciosStr,                                              // D: Servicios
-      payload.honorariosAcordados || payload.monto || 0,         // E: Monto
-      payload.notasDiagnostico || payload.dictamen || "",        // F: Diagnostico
-      "ACTIVO",                                                  // G: Status
-      payload.createdAt || new Date().toISOString(),             // H: Fecha
-      payload.asesor || "",                                      // I: Asesor
-      payload.firmaAsesor || "",                                 // J: FirmaAsesor
-      payload.notasExtra || "",                                  // K: NotasExtra
-      payload.url_diagnostico || ""                              // L: URL_Diagnostico
-    ];
+    const mapVal = (colName, val) => {
+      let idx = headers.indexOf(colName.toLowerCase());
+      if (val === undefined) return idx !== -1 ? rowData[idx] : "";
+      if (idx !== -1) rowData[idx] = val;
+    };
     
+    if (isU2) {
+      mapVal("id", searchHojaId);
+      mapVal("clienteid", searchClienteId);
+      mapVal("mes", new Date().toLocaleString('es-MX', {month: 'long', year: 'numeric'}));
+      mapVal("estatus", "ACTIVO");
+      mapVal("recibido", 0);
+      mapVal("imss", 0);
+      mapVal("honorarios", honorarios);
+      mapVal("updatedat", new Date().toISOString());
+      mapVal("servicios_u2", serviciosStr);
+    } else {
+      mapVal("id_hoja", searchHojaId);
+      mapVal("id_cliente", searchClienteId);
+      mapVal("universo", payload.universo || "U1");
+      mapVal("servicios", serviciosStr);
+      mapVal("monto", honorarios);
+      mapVal("diagnostico", payload.notasDiagnostico || payload.dictamen || "");
+      mapVal("status", "ACTIVO");
+      mapVal("fecha", payload.createdAt || new Date().toISOString());
+      mapVal("asesor", payload.asesor || "");
+      mapVal("firmaasesor", payload.firmaAsesor || "");
+      mapVal("notasextra", payload.notasExtra || "");
+    }
+
+    mapVal("url_diagnostico", payload.url_diagnostico || mapVal("url_diagnostico") || "");
+    
+    // Financial columns overwrite
+    mapVal("subtotal", subtotal);
+    mapVal("iva_absorbido", ivaAbsorbido);
+    mapVal("iva_cobrado", ivaCobrado);
+    mapVal("pago_promotor", pagoPromotor);
+    mapVal("utilidad_bruta", utilidadBruta);
+
     if (rowIndex > -1) {
       sheet.getRange(rowIndex + 1, 1, 1, rowData.length).setValues([rowData]);
     } else {
       sheet.appendRow(rowData);
     }
-    
-    // INICIO SPLIT U2 (Operaciones Recurrentes)
-    if (payload.serviciosU2 && payload.montoU2 > 0) {
-      let sheetU2 = ss.getSheetByName("GESTIONES_U2");
-      if (!sheetU2) {
-        sheetU2 = ss.insertSheet("GESTIONES_U2");
-        sheetU2.appendRow(["ID", "ClienteID", "Mes", "Estatus", "Recibido", "IMSS", "Honorarios", "ComprobanteIMSS", "FacturaHonorarios", "UpdatedAt", "Servicios_U2"]);
-      }
-      
-      const dataU2 = sheetU2.getDataRange().getValues();
-      const headersU2 = dataU2[0].map(h => h.toString().toLowerCase().trim());
-      let idColU2 = headersU2.indexOf("id");
-      if (idColU2 === -1) idColU2 = 0;
-      
-      let rowIndexU2 = -1;
-      if (searchHojaId) {
-        for (let i = 1; i < dataU2.length; i++) {
-          if (dataU2[i][idColU2] && dataU2[i][idColU2].toString().toUpperCase().trim() === searchHojaId) {
-            rowIndexU2 = i;
-            break;
-          }
-        }
-      }
-      
-      const rowDataU2 = [
-        searchHojaId || Utilities.getUuid(),                      // A: ID (Usamos el ID_Hoja para evitar duplicados en autoguardado)
-        searchClienteId,                                          // B: ClienteID
-        new Date().toLocaleString('es-MX', {month: 'long', year: 'numeric'}), // C: Mes
-        "ACTIVO",                                                 // D: Estatus
-        0,                                                        // E: Recibido
-        0,                                                        // F: IMSS
-        payload.montoU2 || 0,                                     // G: Honorarios (Solo lo de U2)
-        "",                                                       // H: ComprobanteIMSS
-        "",                                                       // I: FacturaHonorarios
-        new Date().toISOString(),                                 // J: UpdatedAt
-        payload.serviciosU2                                       // K: Servicios_U2 (Útil para saber qué se gestiona)
-      ];
-      
-      if (rowIndexU2 > -1) {
-        sheetU2.getRange(rowIndexU2 + 1, 1, 1, rowDataU2.length).setValues([rowDataU2]);
-      } else {
-        sheetU2.appendRow(rowDataU2);
-      }
-    }
-    // FIN SPLIT U2
     
     return createResponse({ success: true });
   } finally {
