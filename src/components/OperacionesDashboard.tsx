@@ -319,13 +319,25 @@ export default function OperacionesDashboard() {
   };
 
   const getClientDiagnosticUrl = (clientId: string) => {
-    const clientHojas = hojas
-      .filter((h: any) => h.clienteid === clientId || h.id_cliente === clientId || h.idcliente === clientId)
-      .sort((a: any, b: any) => new Date(b.createdat || b.fecha || 0).getTime() - new Date(a.createdat || a.fecha || 0).getTime());
+    if (!clientId) return null;
+    const idUpper = String(clientId).toUpperCase().trim();
     
-    if (clientHojas.length > 0) {
-      return clientHojas[0].url_diagnostico || clientHojas[0].urldiagnostico;
+    // 1. Buscar en HOJAS_SERVICIO (U1 o Híbridos)
+    const hoja: any = hojas.find((h: any) => 
+      String(h.id_cliente || h.clienteid || h.idcliente || h.id || '').toUpperCase().trim() === idUpper
+    );
+    if (hoja && (hoja.url_diagnostico || hoja.urldiagnostico || hoja.urldiagnóstico)) {
+      return hoja.url_diagnostico || hoja.urldiagnostico || hoja.urldiagnóstico;
     }
+
+    // 2. Buscar en GESTIONES_U2 (U2 Puros)
+    const gestion = gestionesU2.find((g: any) => 
+      String(g.clienteid || g.id_cliente || g.idcliente || g.id || '').toUpperCase().trim() === idUpper
+    );
+    if (gestion && (gestion.url_diagnostico || gestion.urldiagnostico || gestion.urldiagnóstico)) {
+      return gestion.url_diagnostico || gestion.urldiagnostico || gestion.urldiagnóstico;
+    }
+
     return null;
   };
 
@@ -489,7 +501,7 @@ export default function OperacionesDashboard() {
                                     if (diagUrl) {
                                       window.open(diagUrl, '_blank');
                                     } else {
-                                      window.open(`https://drive.google.com/drive/folders/${id_carpeta}`, '_blank');
+                                      window.open(`https://drive.google.com/drive/folders/${client.id_carpeta_drive || client.idcarpetadrive}`, '_blank');
                                     }
                                   }}
                                   className="p-2 hover:bg-white/10 rounded-xl text-gold transition-all hover:scale-110" 
