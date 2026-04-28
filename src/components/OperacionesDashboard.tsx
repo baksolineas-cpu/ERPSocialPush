@@ -322,20 +322,22 @@ export default function OperacionesDashboard() {
     if (!clientId) return null;
     const idUpper = String(clientId).toUpperCase().trim();
     
-    // 1. Buscar en HOJAS_SERVICIO (U1 o Híbridos)
+    // 1. Buscar en HOJAS_SERVICIO (Asegurando que el registro SÍ tenga URL)
     const hoja: any = hojas.find((h: any) => 
-      String(h.id_cliente || h.clienteid || h.idcliente || h.id || '').toUpperCase().trim() === idUpper
+      String(h.id_cliente || h.clienteid || h.idcliente || h.id || '').toUpperCase().trim() === idUpper &&
+      (h.url_diagnostico || h.urldiagnostico || (h as any).urldiagnóstico || h.firmaurl)
     );
-    if (hoja && (hoja.url_diagnostico || hoja.urldiagnostico || hoja.urldiagnóstico)) {
-      return hoja.url_diagnostico || hoja.urldiagnostico || hoja.urldiagnóstico;
+    if (hoja) {
+      return hoja.url_diagnostico || hoja.urldiagnostico || (hoja as any).urldiagnóstico || hoja.firmaurl;
     }
 
-    // 2. Buscar en GESTIONES_U2 (U2 Puros)
-    const gestion = gestionesU2.find((g: any) => 
-      String(g.clienteid || g.id_cliente || g.idcliente || g.id || '').toUpperCase().trim() === idUpper
+    // 2. Buscar en GESTIONES_U2 (Asegurando que el registro SÍ tenga URL)
+    const gestion: any = gestionesU2.find((g: any) => 
+      String(g.clienteid || g.id_cliente || g.idcliente || g.id || '').toUpperCase().trim() === idUpper &&
+      (g.url_diagnostico || g.urldiagnostico || (g as any).urldiagnóstico || g.firmaurl)
     );
-    if (gestion && (gestion.url_diagnostico || gestion.urldiagnostico || gestion.urldiagnóstico)) {
-      return gestion.url_diagnostico || gestion.urldiagnostico || gestion.urldiagnóstico;
+    if (gestion) {
+      return gestion.url_diagnostico || gestion.urldiagnostico || (gestion as any).urldiagnóstico || gestion.firmaurl;
     }
 
     return null;
