@@ -294,6 +294,16 @@ export default function EntrevistaHub() {
   const handleAutoSave = async () => {
     if (!data.id && !data.curp) return;
     try {
+      // Normalización de IDs antes de enviar (CURP10)
+      const rawId = (data.curp || data.id || "").toString().replace("NEW_", "");
+      const cleanId = rawId.substring(0, 10).toUpperCase();
+      
+      const payloadNormalized = {
+        ...data,
+        id: cleanId,
+        curp: (data.curp || "").toUpperCase().trim()
+      };
+
       const u2Services = hojaServicio.servicios.filter(s => s.universo === 'U2');
       const u1Services = hojaServicio.servicios.filter(s => s.universo === 'U1');
       
@@ -303,10 +313,10 @@ export default function EntrevistaHub() {
       const serviciosU1 = u1Services.map(s => s.nombre).join(', ');
       const montoU1 = u1Services.reduce((sum, s) => sum + (s.precio || 0), 0);
 
-      await callGAS('CREATE_CLIENTE', data);
+      await callGAS('CREATE_CLIENTE', payloadNormalized);
       // También guardamos progreso de la hoja actual
       await callGAS('CREATE_HOJA', { 
-        ...data, 
+        ...payloadNormalized, 
         id_hoja: sessionHojaId,
         universo: hojaServicio.universo,
         servicios: hojaServicio.servicios.map(s => s.nombre),
@@ -653,6 +663,10 @@ export default function EntrevistaHub() {
     setIsProcessing(true);
     const firmaAsesor = sigCanvasAsesor.current?.getTrimmedCanvas().toDataURL('image/png');
     
+    // Normalización de IDs antes de enviar
+    const rawId = (data.curp || data.id || "").toString().replace("NEW_", "");
+    const cleanId = rawId.substring(0, 10).toUpperCase();
+
     const u2Services = hojaServicio.servicios.filter(s => s.universo === 'U2');
     const u1Services = hojaServicio.servicios.filter(s => s.universo === 'U1');
     
@@ -673,6 +687,9 @@ export default function EntrevistaHub() {
 
       const res = await callGAS('FINALIZE_AUDIT', {
         ...data,
+        id: cleanId,
+        clienteId: cleanId,
+        curp: (data.curp || "").toUpperCase().trim(),
         estatusfirma: 'PENDIENTE',
         id_hoja: sessionHojaId,
         asesor: asesorNombre,
@@ -1160,7 +1177,7 @@ export default function EntrevistaHub() {
                                       disabled={isProcessing} 
                                       className="flex-1 py-5 bg-[#003366] disabled:bg-slate-400 text-white rounded-2xl font-black uppercase text-[11px] shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2 tracking-widest"
                                     >
-                                      {isProcessing ? "Procesando..." : (data.contrato_url && data.contrato_url.length > 5 ? "Sellar y Finalizar Expediente" : "Sellar y Generar Envío")} 
+                                      {isProcessing ? "Procesando firma y documentos..." : "Finalizar y Generar Contrato"} 
                                       {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16}/>}
                                     </button>
                                 </div>

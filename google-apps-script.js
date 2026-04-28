@@ -302,15 +302,19 @@ function handleUpdateSignature(payload) {
  */
 function handleFinalizeAudit(payload) {
   logDebug("DEBUG_ENTRADA", "Payload recibido: " + JSON.stringify(payload));
-  const searchId = payload.id || payload.clienteId || payload.curp;
+  // Asegurar que searchId sea CURP10
+  const rawId = (payload.curp || payload.id || payload.clienteId || "").toString().replace("NEW_", "");
+  const searchId = rawId.substring(0, 10).toUpperCase();
+  
   if (!payload.id) payload.id = searchId;
+  payload.id_cliente = searchId;
 
   // 1. Actualizamos el registro del cliente
   try {
     handleCreateCliente(payload);
   } catch(e) { logDebug("ERR_CLIENTE_UPDATE", e.toString()); }
   
-  // 2. Registramos formalmente la hoja de servicio (NUEVA FILA siempre por sessionHojaId)
+  // 2. Registramos formalmente la hoja de servicio (UPSERT)
   try {
     handleCreateHoja(payload);
   } catch(e) { logDebug("ERR_HOJA_CREATION", e.toString()); }
@@ -318,12 +322,29 @@ function handleFinalizeAudit(payload) {
   // 3. GENERACIÓN DE DOCUMENTOS (Blindada con try/catch independientes)
   try {
     const clientes = getSheetData("CLIENTES");
-    const cliente = clientes.find(c => (c.curp === (payload.curp || searchId) || c.id === (payload.id || searchId)));
+    const cliente = clientes.find(c => (c.curp && c.curp.toString().substring(0,10).toUpperCase() === searchId) || (c.id && c.id.toString().toUpperCase() === searchId));
     
     if (cliente) {
       const folderId = cliente.id_carpeta_drive || cliente.idcarpetadrive;
-      if (folderId) {
-        const folder = DriveApp.getFolderById(folderId);
+      let folder;
+      try {
+        if (folderId) folder = DriveApp.getFolderById(folderId);
+      } catch(e) { logDebug("FOLDER_BY_ID_FAIL", "ID inválido: " + folderId); }
+
+      if (!folder) {
+        // Fallback: Buscar por nombre según requerimiento 'CLIENTE_' + curp10
+        const folderName = "CLIENTE_" + searchId;
+        const folders = DriveApp.getFoldersByName(folderName);
+        if (folders.hasNext()) {
+          folder = folders.next();
+        } else {
+          // Intento Alternativo: Buscar por el formato [CURP10]
+          const altFolders = DriveApp.getFoldersByName(`[${searchId}]`);
+          if (altFolders.hasNext()) folder = altFolders.next();
+        }
+      }
+
+      if (folder) {
         let finalContratoUrl = "";
         let finalDiagUrl = "";
         
@@ -371,6 +392,7 @@ function handleFinalizeAudit(payload) {
         } catch(e) {
           logDebug("ERR_CLONE_DIAGNOSTICO", e.toString());
         }
+
 
         // C. AUTO-SELLADO (Solo si tenemos URL de documento y es recurrente)
         if (finalDiagUrl && (payload.tipoDocEval === 'DIAGNOSTICO' || !payload.tipoDocEval)) {
@@ -696,7 +718,9 @@ function handleCreateCliente(payload) {
       }
     }
 
-    const curp10 = payload.curp ? payload.curp.toString().substring(0, 10).toUpperCase() : (payload.id || "").toString().replace("NEW_", "");
+    const rawCurp = (payload.curp || payload.id || "").toString().replace("NEW_", "");
+    const curp10 = rawCurp.substring(0, 10).toUpperCase();
+    
     // 2. RECUPERAR DATOS PREVIOS PARA NO SOBREESCRIBIR CON VACÍOS (MERGE)
     let rowData = [];
     if (existingRowIndex > -1) {
@@ -713,7 +737,7 @@ function handleCreateCliente(payload) {
     mapUpdate(idCol !== -1 ? idCol : 0, curp10);               // A: id (Forzamos realId)
     mapUpdate(1, payload.nombre);                              // B: Nombre
     mapUpdate(2, "");                                          // C: Apellidos (Mantenemos columna vacía para no desplazar)
-    mapUpdate(3, payload.curp);                                // D: CURP
+    mapUpdate(3, payload.curp || rawCurp);                     // D: CURP
     
     // NSS Handling: Prefer list if it has elements, else fallback to single nss
     let nssValue = "";
@@ -933,21 +957,21 @@ function handleCreateHoja(payload) {
 
     // PARTE 1: HOJAS_SERVICIO (UPSERT por ClienteID y Universo)
     let serviciosU1Str = payload.serviciosU1 || (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || ""));
-    let montoU1 = parseFloat(payload.montoU1 || payload.monto || 0);
+    let montoU1 = parseFloat(payload.monto1 || payload.montoU1 || payload.monto || 0);
 
     const sheetU1Obj = getOrInitSheet("HOJAS_SERVICIO", false);
-    const cIdColHoja = sheetU1Obj.headers.indexOf("id_cliente");
-    const univColHoja = sheetU1Obj.headers.indexOf("universo");
+    const idClienteColIdx = sheetU1Obj.headers.indexOf("id_cliente");
+    const universoColIdx = sheetU1Obj.headers.indexOf("universo");
 
     let rowIndexU1 = -1;
     for (let i = 1; i < sheetU1Obj.data.length; i++) {
-      const rowCid = sheetU1Obj.data[i][cIdColHoja] ? sheetU1Obj.data[i][cIdColHoja].toString().toUpperCase().trim() : "";
-      const rowUniv = sheetU1Obj.data[i][univColHoja] ? sheetU1Obj.data[i][univColHoja].toString().toUpperCase().trim() : "";
-      const targetUniv = payload.universo || (hasU2 ? "U1/U2" : "U1");
-      
-      if (rowCid === searchClienteId && rowUniv === targetUniv.toUpperCase()) {
-        rowIndexU1 = i; break;
-      }
+        const rowCid = sheetU1Obj.data[i][idClienteColIdx] ? sheetU1Obj.data[i][idClienteColIdx].toString().toUpperCase().trim() : "";
+        const rowUniv = sheetU1Obj.data[i][universoColIdx] ? sheetU1Obj.data[i][universoColIdx].toString().toUpperCase().trim() : "";
+        const targetUniv = (payload.universo || (hasU2 ? "U1/U2" : "U1")).toUpperCase();
+        
+        if (rowCid === searchClienteId && rowUniv === targetUniv) {
+            rowIndexU1 = i; break;
+        }
     }
 
     const rowDataU1 = rowIndexU1 > -1 ? [...sheetU1Obj.data[rowIndexU1]] : new Array(sheetU1Obj.headers.length).fill("");
