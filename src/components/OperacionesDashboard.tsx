@@ -30,6 +30,84 @@ import { Cliente, HojaServicio } from '@/types';
 
 type Tab = 'clientes' | 'pagos_u2' | 'comisiones' | 'conciliacion';
 
+const parseCSV = (text: string) => {
+  const lines = text.split(/\r?\n/);
+  const result: string[][] = [];
+  for(const line of lines) {
+    if(!line.trim()) continue;
+    
+    const fields = [];
+    let field = '';
+    let inQuotes = false;
+    for(let i=0; i<line.length; i++) {
+      const char = line[i];
+      if(char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        fields.push(field.trim());
+        field = '';
+      } else {
+        field += char;
+      }
+    }
+    fields.push(field.trim());
+    result.push(fields);
+  }
+  return result;
+};
+
+const findClientMatch = (conceptoReal: string, clientesArray: any[]) => {
+  const concepto = (conceptoReal || '').toUpperCase();
+  
+  // Nivel 1: Regex ID Exacto
+  const idRegex = /[A-Z]{4}\d{6}/g;
+  const idsExactos = concepto.match(idRegex) || [];
+  for (const matchId of idsExactos) {
+    const exactMatch = clientesArray.find(c => c.id?.toUpperCase() === matchId);
+    if (exactMatch) return { matchType: 'exact', client: exactMatch, reason: 'ID Exacto' };
+  }
+
+  // Nivel 2: CURP (18) -> primeros 10
+  const curpRegex = /[A-Z]{4}\d{6}[HM][A-Z]{5}\d{2}/g;
+  const curps = concepto.match(curpRegex) || [];
+  for (const curp of curps) {
+    const tenCurp = curp.substring(0, 10);
+    const curpMatch = clientesArray.find(c => c.id?.toUpperCase() === tenCurp || c.curp?.toUpperCase().startsWith(tenCurp));
+    if (curpMatch) return { matchType: 'exact', client: curpMatch, reason: 'CURP Exacto' };
+  }
+
+  // Iterate for level 3, 4, 5
+  let suggestedMatch = null;
+  for (const c of clientesArray) {
+    const nombresSplit = (c.nombre || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(' ').filter((x: string) => x);
+    const apellidosSplit = (c.apellidos || c.apellido || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(' ').filter((x: string) => x);
+    
+    const fullname = [...nombresSplit, ...apellidosSplit].join(' ');
+    
+    // Nivel 3: Nombre Exacto
+    if (fullname && concepto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(fullname)) {
+       return { matchType: 'exact', client: c, reason: 'Nombre Exacto' };
+    }
+    
+    // Nivel 4: Nombre Fusionado (Cajeros)
+    const fused = [...nombresSplit, ...apellidosSplit].join('');
+    if (fused && concepto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(fused)) {
+       return { matchType: 'exact', client: c, reason: 'Nombre Fusionado' };
+    }
+    
+    // Nivel 5: Match Sugerido (Primer Nombre + Primer Apellido sep)
+    if (nombresSplit.length > 0 && apellidosSplit.length > 0) {
+      if (concepto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(nombresSplit[0]) && concepto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(apellidosSplit[0])) {
+         suggestedMatch = { matchType: 'suggested', client: c, reason: 'Coincidencia Parcial' };
+      }
+    }
+  }
+
+  if (suggestedMatch) return suggestedMatch;
+
+  return { matchType: 'none', client: null, reason: 'Sin Match' };
+};
+
 export default function OperacionesDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('clientes');
   const [loading, setLoading] = useState(true);
@@ -137,34 +215,59 @@ export default function OperacionesDashboard() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       const text = event.target?.result as string;
-      const lines = text.split('\n');
+      const rows = parseCSV(text);
       
-      let matchCount = 0;
-      let procesados = 0;
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        const upperLine = line.toUpperCase();
-        
-        const matchClient = clients.find(c => {
-           return c.id && upperLine.includes(c.id.toUpperCase());
-        });
-
-        if (matchClient) {
-          matchCount++;
-          if (tipoCuenta === 'U2') {
-             try {
-                const res = await callGAS('RECORD_PAYMENT', { clienteId: matchClient.id });
-                if (res?.success) procesados++;
-             } catch(e) {}
-          } else {
-             procesados++; // Logic for U1 could be integrated here... but instructed to "Si encuentra un Match en la 'CONCENTRADORA', debe disparar callGAS('RECORD_PAYMENT'..."
-          }
+      let headerRowIdx = -1;
+      let fechaIdx = 0, conceptoIdx = 1, abonoIdx = 3;
+      
+      for(let i=0; i<rows.length; i++) {
+        const rLower = rows[i].map(x => (x || '').toLowerCase());
+        if (rLower.some(x => x.includes('fecha')) && rLower.some(x => x.includes('abono'))) {
+          headerRowIdx = i;
+          fechaIdx = rLower.findIndex(x => x.includes('fecha'));
+          conceptoIdx = rLower.findIndex(x => x.includes('concepto') || x.includes('referencia'));
+          abonoIdx = rLower.findIndex(x => x.includes('abono'));
+          break;
         }
       }
+
+      if (headerRowIdx === -1) {
+        fechaIdx = 0;
+        conceptoIdx = 2; // Columna base BBVA
+        abonoIdx = 5;
+      }
+
+      const processedData: any[] = [];
       
-      alert(`Análisis de ${tipoCuenta} completado.\nCoincidencias encontradas: ${matchCount}\nPagos procesados (U2): ${tipoCuenta === 'U2' ? procesados : 0}`);
-      if (tipoCuenta === 'U2' && procesados > 0) fetchData();
+      for (let i = headerRowIdx + 1; i < rows.length; i++) {
+         const row = rows[i];
+         if (row.length <= Math.max(fechaIdx, conceptoIdx, abonoIdx)) continue;
+         
+         const abonoStr = (row[abonoIdx] || '').replace(/[$,]/g, '').trim();
+         const abonoVal = parseFloat(abonoStr);
+         
+         if (!isNaN(abonoVal) && abonoVal > 0) {
+            const fecha = row[fechaIdx] || '';
+            let concepto = row[conceptoIdx] || '';
+            if (headerRowIdx === -1 && row[3]) concepto += ` ${row[3]}`;
+            
+            const matchResult = findClientMatch(concepto, clients);
+            
+            processedData.push({
+               uid: `${Date.now()}-${i}`,
+               fecha: fecha,
+               concepto: concepto,
+               monto: abonoVal,
+               matchType: matchResult.matchType as any,
+               client: matchResult.client,
+               reason: matchResult.reason,
+               status: 'PENDING',
+               selectedClientId: matchResult.client?.id || ''
+            });
+         }
+      }
+      
+      setCsvData(processedData);
     };
     reader.readAsText(file);
     e.target.value = ''; // clean input
@@ -768,6 +871,120 @@ export default function OperacionesDashboard() {
                  </div>
                )}
             </section>
+
+            {csvData.length > 0 && (
+              <section className="bg-white/5 rounded-[32px] border border-white/10 overflow-hidden shadow-2xl mt-12 p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="mb-6 flex justify-between items-center">
+                  <div>
+                    <h2 className="text-2xl font-black text-white italic uppercase tracking-tight">Conciliación Inteligente</h2>
+                    <p className="text-[10px] text-white/40 font-black uppercase tracking-widest mt-1">Verificación y registro de depósitos</p>
+                  </div>
+                  <button onClick={() => setCsvData([])} className="px-4 py-2 bg-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Limpiar</button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-white/5">
+                        <th className="px-6 py-4 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Fecha</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Concepto</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Monto</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Cliente Match</th>
+                        <th className="px-6 py-4 text-[10px] font-black text-white/30 uppercase tracking-[0.2em] text-center">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {csvData.map((row, idx) => (
+                        <tr key={row.uid} className="hover:bg-white/5 transition-colors">
+                          <td className="px-6 py-4 text-xs font-bold text-white/70">{row.fecha}</td>
+                          <td className="px-6 py-4 text-xs text-white/50 w-64 break-words">{row.concepto}</td>
+                          <td className="px-6 py-4 text-sm font-black text-gold">${row.monto.toLocaleString('es-MX', {minimumFractionDigits: 2})}</td>
+                          <td className="px-6 py-4">
+                             {row.matchType === 'exact' && (
+                               <div className="flex flex-col">
+                                 <span className="text-sm font-black text-emerald-400">{row.client?.nombre} {row.client?.apellidos || row.client?.apellido}</span>
+                                 <span className="text-[9px] text-emerald-400/50 uppercase tracking-widest">{row.reason}</span>
+                               </div>
+                             )}
+                             {row.matchType === 'suggested' && (
+                               <div className="flex flex-col">
+                                 <span className="text-sm font-black text-yellow-400">{row.client?.nombre} {row.client?.apellidos || row.client?.apellido}</span>
+                                 <span className="text-[9px] text-yellow-400/50 uppercase tracking-widest">{row.reason}</span>
+                               </div>
+                             )}
+                             {row.matchType === 'none' && (
+                               <div className="flex flex-col space-y-1">
+                                 <span className="text-[10px] text-red-400 font-bold uppercase tracking-widest">Sin Match</span>
+                                 <select 
+                                    className="bg-black/50 border border-white/10 text-white text-xs px-2 py-1.5 rounded-lg outline-none"
+                                    value={row.selectedClientId}
+                                    onChange={(e) => {
+                                       const newCsv = [...csvData];
+                                       newCsv[idx].selectedClientId = e.target.value;
+                                       setCsvData(newCsv);
+                                    }}
+                                 >
+                                    <option value="" className="text-white/50">Seleccionar Cliente Manual...</option>
+                                    {clients.map((c: any) => <option key={c.id} value={c.id}>{c.nombre} {c.apellidos || c.apellido}</option>)}
+                                 </select>
+                               </div>
+                             )}
+                          </td>
+                          <td className="px-6 py-4 flex justify-center">
+                             {row.status === 'PROCESADO' ? (
+                                <span className="inline-flex items-center gap-1.5 text-[10px] font-black text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-4 py-2 rounded-xl border border-emerald-500/20">
+                                  <Check size={14} /> Procesado
+                                </span>
+                             ) : (
+                                <button
+                                  disabled={!row.selectedClientId || row.status === 'PROCESING'}
+                                  onClick={async () => {
+                                     const clientId = row.selectedClientId;
+                                     if(!clientId) return;
+                                     
+                                     const newCsvStart = [...csvData];
+                                     newCsvStart[idx].status = 'PROCESING';
+                                     setCsvData(newCsvStart);
+
+                                     try {
+                                       const res = await callGAS('RECORD_PAYMENT', { clienteId: clientId });
+                                       if (res?.success) {
+                                          const newCsvEnd = [...csvData];
+                                          newCsvEnd[idx].status = 'PROCESADO';
+                                          setCsvData(newCsvEnd);
+                                       } else {
+                                          alert('Error al procesar: ' + res.error);
+                                          const newCsvFail = [...csvData];
+                                          newCsvFail[idx].status = 'PENDING';
+                                          setCsvData(newCsvFail);
+                                       }
+                                     } catch(err) {
+                                        alert('Error de conexión.');
+                                        const newCsvFail = [...csvData];
+                                        newCsvFail[idx].status = 'PENDING';
+                                        setCsvData(newCsvFail);
+                                     }
+                                  }}
+                                  className={cn(
+                                     "px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95",
+                                     row.status === 'PROCESING' && "bg-white/10 text-white/40 cursor-wait",
+                                     row.status !== 'PROCESING' && !row.selectedClientId && "bg-white/5 text-white/20 cursor-not-allowed",
+                                     row.status !== 'PROCESING' && row.selectedClientId && row.matchType === 'exact' && "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white border border-emerald-500/30",
+                                     row.status !== 'PROCESING' && row.selectedClientId && row.matchType === 'suggested' && "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500 hover:text-black border border-yellow-500/30",
+                                     row.status !== 'PROCESING' && row.selectedClientId && row.matchType === 'none' && "bg-blue-500/20 text-blue-400 hover:bg-blue-500 hover:text-white border border-blue-500/30"
+                                  )}
+                                >
+                                   {row.status === 'PROCESING' ? '⏳ Espere...' : 'Confirmar Pago'}
+                                </button>
+                             )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
           </div>
         )}
         {activeTab === ('calendario' as any) && (
