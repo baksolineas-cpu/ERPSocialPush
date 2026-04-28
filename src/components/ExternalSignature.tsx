@@ -33,7 +33,10 @@ export default function ExternalSignature() {
 
   useEffect(() => {
     if (clienteId) {
-      getGASData('GET_CLIENTE_STATUS', { curp: clienteId }).then(res => {
+      const cleanId = (clienteId || "").toString().replace("NEW_", "").substring(0, 10).toUpperCase();
+      console.log("[DEBUG_SIGNATURE] Intentando consultar ID:", cleanId);
+      
+      getGASData('GET_CLIENTE_STATUS', { curp: cleanId }).then(res => {
          if (res?.data) {
            setClientData(res.data);
            if (res.data.folder_url) setFolderUrl(res.data.folder_url);
@@ -44,8 +47,13 @@ export default function ExternalSignature() {
            } else if (res.data.monto) {
              setMontoTotal(res.data.monto.toString());
            }
+         } else {
+           console.warn("[DEBUG_SIGNATURE] El backend no retornó datos para ID:", cleanId);
          }
-      }).catch(() => setError("No se pudo cargar la información del expediente."));
+      }).catch((err) => {
+        console.error("[DEBUG_SIGNATURE] Error en GET_CLIENTE_STATUS:", err);
+        setError("No se pudo cargar la información del expediente.");
+      });
     }
   }, [clienteId]);
 
@@ -63,9 +71,13 @@ export default function ExternalSignature() {
     if (!selfieBase64 || !firmaBase64 || !clienteId) return;
     setIsProcessing(true);
     setError(null);
+    
+    const cleanId = (clienteId || "").toString().replace("NEW_", "").substring(0, 10).toUpperCase();
+    console.log("[DEBUG_SIGNATURE] Enviando firma para ID:", cleanId);
+
     try {
       const res = await callGAS("UPDATE_CLIENTE_SIGNATURE", {
-          clienteId: clienteId.toUpperCase(),
+          clienteId: cleanId,
           tipoDocumento: tipoDoc,
           selfieBase64,
           firmaBase64,
@@ -75,6 +87,7 @@ export default function ExternalSignature() {
       if (res?.folderUrl) setFolderUrl(res.folderUrl);
       setStep(3); // Éxito
     } catch (err) {
+      console.error("[DEBUG_SIGNATURE] Error en UPDATE_CLIENTE_SIGNATURE:", err);
       setError("Fallo en la vinculación. Intente de nuevo.");
     } finally {
       setIsProcessing(false);
@@ -130,7 +143,9 @@ export default function ExternalSignature() {
           <div className="bg-[#DAA520] p-1.5 rounded-lg"><ShieldCheck className="text-[#003366]" size={20} /></div>
           <div><h1 className="text-sm font-black text-white leading-none uppercase">Social Push Digital</h1><p className="text-[8px] font-bold text-white/50 uppercase tracking-widest">Portal de Firma Segura</p></div>
         </div>
-        <div className="bg-white/10 px-4 py-1.5 rounded-full text-white text-[10px] font-black uppercase border border-white/10">ID: {clienteId?.toUpperCase()}</div>
+        <div className="bg-white/10 px-4 py-1.5 rounded-full text-white text-[10px] font-black uppercase border border-white/10">
+          ID: {clienteId?.toString().replace("NEW_", "").substring(0, 10).toUpperCase()}
+        </div>
       </header>
  
        <main className="flex-1 max-w-4xl mx-auto w-full p-4 md:p-8 space-y-8">

@@ -322,7 +322,8 @@ function handleFinalizeAudit(payload) {
   // 3. GENERACIÓN DE DOCUMENTOS (Blindada con try/catch independientes)
   try {
     const clientes = getSheetData("CLIENTES");
-    const cliente = clientes.find(c => (c.curp && c.curp.toString().substring(0,10).toUpperCase() === searchId) || (c.id && c.id.toString().toUpperCase() === searchId));
+    const searchIdClean = searchId.substring(0, 10).toUpperCase();
+    const cliente = clientes.find(c => (c.curp && c.curp.toString().substring(0,10).toUpperCase() === searchIdClean) || (c.id && c.id.toString().toUpperCase() === searchIdClean));
     
     if (cliente) {
       const folderId = cliente.id_carpeta_drive || cliente.idcarpetadrive;
@@ -333,13 +334,13 @@ function handleFinalizeAudit(payload) {
 
       if (!folder) {
         // Fallback: Buscar por nombre según requerimiento 'CLIENTE_' + curp10
-        const folderName = "CLIENTE_" + searchId;
+        const folderName = "CLIENTE_" + searchIdClean;
         const folders = DriveApp.getFoldersByName(folderName);
         if (folders.hasNext()) {
           folder = folders.next();
         } else {
           // Intento Alternativo: Buscar por el formato [CURP10]
-          const altFolders = DriveApp.getFoldersByName(`[${searchId}]`);
+          const altFolders = DriveApp.getFoldersByName(`[${searchIdClean}]`);
           if (altFolders.hasNext()) folder = altFolders.next();
         }
       }
@@ -352,7 +353,7 @@ function handleFinalizeAudit(payload) {
         if (payload.tipoDocEval && payload.tipoDocEval.includes('CONTRATO')) {
           try {
             const templateDoc = DriveApp.getFileById(CONTRATO_TEMPLATE_ID);
-            const newDocFile = templateDoc.makeCopy("CONTRATO_MARCO_" + searchId, folder);
+            const newDocFile = templateDoc.makeCopy("CONTRATO_MARCO_" + searchIdClean, folder);
             if (newDocFile) {
               const doc = DocumentApp.openById(newDocFile.getId());
               const body = doc.getBody();
@@ -370,9 +371,11 @@ function handleFinalizeAudit(payload) {
               
               doc.saveAndClose();
               Utilities.sleep(2000);
-              const pdfFile = folder.createFile(newDocFile.getAs('application/pdf')).setName(`CONTRATO_MARCO_${searchId}.pdf`);
+              const pdfFile = folder.createFile(newDocFile.getAs('application/pdf')).setName(`CONTRATO_MARCO_${searchIdClean}.pdf`);
               pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
               finalContratoUrl = pdfFile.getUrl();
+              
+              // LIMPIEZA DRIVE: Trashed temporal
               newDocFile.setTrashed(true);
             }
           } catch(e) {
@@ -384,9 +387,10 @@ function handleFinalizeAudit(payload) {
         try {
           if (DIAGNOSTICO_TEMPLATE_ID && !DIAGNOSTICO_TEMPLATE_ID.includes("placeholder")) {
             const diagTemplateDoc = DriveApp.getFileById(DIAGNOSTICO_TEMPLATE_ID);
-            const newDiagFile = diagTemplateDoc.makeCopy("DIAGNOSTICO_CERTIFICADO_" + searchId, folder);
+            const newDiagFile = diagTemplateDoc.makeCopy("DIAGNOSTICO_CERTIFICADO_" + searchIdClean, folder);
             if (newDiagFile) finalDiagUrl = newDiagFile.getUrl();
           } else {
+             // Modificado para retornar URL de PDF y auto-limpiar
              finalDiagUrl = generateDiagnosticPDF(cliente, payload.servicios, payload.montoAcordado || payload.monto || payload.honorariosAcordados, payload.asesor, payload.firmaAsesor, payload.id_hoja, payload.montoU2);
           }
         } catch(e) {
@@ -543,12 +547,16 @@ function generateDiagnosticPDF(clientData, servicesData, montoTotal, asesorName,
 
     
     doc.saveAndClose();
+    Utilities.sleep(2000);
     
-    const file = DriveApp.getFileById(doc.getId());
-    file.moveTo(folder);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    // CONVERSIÓN A PDF Y TRASH DEL DOC
+    const docFile = DriveApp.getFileById(doc.getId());
+    const pdfBlob = docFile.getAs('application/pdf');
+    const finalPdf = folder.createFile(pdfBlob).setName(`DIAGNOSTICO_CERTIFICADO_${clientData.curp}_${suffix}.pdf`);
+    finalPdf.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     
-    return file.getUrl();
+    docFile.setTrashed(true);
+    return finalPdf.getUrl();
   } catch(e) {
     logDebug("ERR_GEN_DIAG_PDF_HELPER", e.toString());
   }
@@ -913,7 +921,11 @@ function handleCreateHoja(payload) {
     } catch(e) {}
     
     let montoTotal = parseFloat(payload.montoAcordado || payload.honorariosAcordados || payload.monto || 0);
-    const hasU2 = payload.universo === 'U2' || (payload.serviciosU2 && payload.montoU2 > 0);
+    
+    // RUTEO INTELIGENTE DE UNIVERSO (Directiva: 'Modalidad 40' o 'PTI' -> U2)
+    const serviciosGlobalStr = (payload.serviciosU1 || "") + (payload.serviciosU2 || "") + (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || ""));
+    const forceU2 = serviciosGlobalStr.includes('Modalidad 40') || serviciosGlobalStr.includes('PTI') || serviciosGlobalStr.includes('Modalidad 10');
+    const hasU2 = forceU2 || payload.universo === 'U2' || (payload.serviciosU2 && payload.montoU2 > 0);
 
     // Inteligencia de Carpetas (Subcarpetas U2)
     if (hasU2 && folderId) {
@@ -998,7 +1010,20 @@ function handleCreateHoja(payload) {
     mapVal(sheetU1Obj.headers, rowDataU1, "utilidad_bruta", subU1);
 
     if (rowIndexU1 > -1) sheetU1Obj.sheet.getRange(rowIndexU1 + 1, 1, 1, rowDataU1.length).setValues([rowDataU1]);
-    else sheetU1Obj.sheet.appendRow(rowDataU1);
+    else {
+      // Buscar primera fila realmente vacía
+      const lastRow = sheetU1Obj.sheet.getLastRow();
+      let nextRow = lastRow + 1;
+      if (lastRow > 0) {
+        const lastCell = sheetU1Obj.sheet.getRange(lastRow, 1).getValue();
+        if (!lastCell) {
+          // Retroceder para encontrar si hay vacíos previos
+          const colA = sheetU1Obj.sheet.getRange(1, 1, lastRow, 1).getValues();
+          for(let r=0; r<colA.length; r++) { if(!colA[r][0]) { nextRow = r+1; break; } }
+        }
+      }
+      sheetU1Obj.sheet.getRange(nextRow, 1, 1, rowDataU1.length).setValues([rowDataU1]);
+    }
 
 
     // PARTE 2: GESTIONES_U2 (UPSERT por ClienteID y Mes)
@@ -1052,7 +1077,8 @@ function handleCreateHoja(payload) {
       mapVal(sheetU2Obj.headers, rowDataU2, "estatus", rowDataU2[sheetU2Obj.headers.indexOf("estatus")] || "ACTIVO");
       mapVal(sheetU2Obj.headers, rowDataU2, "recibido", rowDataU2[sheetU2Obj.headers.indexOf("recibido")] || 0);
       mapVal(sheetU2Obj.headers, rowDataU2, "imss", cuotaIMSS);
-      mapVal(sheetU2Obj.headers, rowDataU2, "honorarios", isMigracion ? honorariosFijos : honorariosFijos * 1.16);
+      // Honorarios U2: En GESTIONES_U2, el campo Honorarios (Columna G) debe ser 0 o vacío por defecto
+      mapVal(sheetU2Obj.headers, rowDataU2, "honorarios", 0);
       mapVal(sheetU2Obj.headers, rowDataU2, "updatedat", new Date().toISOString());
       mapVal(sheetU2Obj.headers, rowDataU2, "servicios_u2", payload.serviciosU2 || payload.servicios || "");
       mapVal(sheetU2Obj.headers, rowDataU2, "url_diagnostico", payload.url_diagnostico || rowDataU2[sheetU2Obj.headers.indexOf("url_diagnostico")] || "");
@@ -1063,7 +1089,16 @@ function handleCreateHoja(payload) {
       mapVal(sheetU2Obj.headers, rowDataU2, "utilidad_bruta", utilidadBrutaU2);
 
       if (rowIndexU2 > -1) sheetU2Obj.sheet.getRange(rowIndexU2 + 1, 1, 1, rowDataU2.length).setValues([rowDataU2]);
-      else sheetU2Obj.sheet.appendRow(rowDataU2);
+      else {
+        // Buscar primera fila realmente vacía en U2
+        const lastRowU2 = sheetU2Obj.sheet.getLastRow();
+        let nextRowU2 = lastRowU2+1;
+        if (lastRowU2 > 0) {
+           const colAU2 = sheetU2Obj.sheet.getRange(1, 1, lastRowU2, 1).getValues();
+           for(let r=0; r<colAU2.length; r++) { if(!colAU2[r][0]) { nextRowU2 = r+1; break; } }
+        }
+        sheetU2Obj.sheet.getRange(nextRowU2, 1, 1, rowDataU2.length).setValues([rowDataU2]);
+      }
     }
 
     return createResponse({ success: true });
