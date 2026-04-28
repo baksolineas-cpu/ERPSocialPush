@@ -322,7 +322,9 @@ function handleFinalizeAudit(payload) {
   const curp10 = rawCurp.substring(0, 10);
   if (!curp10) return createResponse({ status: 'error', message: 'CURP Inválida o faltante' }, 400);
 
-  // 1. Consolidación de Identidad y Carpeta
+  const skipContract = payload.tipoDocEval === 'DIAGNOSTICO';
+
+  // 1. Localizar Carpeta
   let folder;
   try {
     const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
@@ -338,91 +340,108 @@ function handleFinalizeAudit(payload) {
   if (!folder) return createResponse({ status: 'error', message: 'No se localizó la carpeta del cliente para ' + curp10 }, 404);
   const folderId = folder.getId();
 
-  // Sincronizar datos base
-  try {
-    handleCreateCliente({ ...payload, id: curp10 });
-    handleCreateHoja({ ...payload, clienteId: curp10 });
-  } catch(e) { logDebug("SYNC_ERR", e.toString()); }
+  // Búsqueda flexible de archivos si no vienen en payload
+  const getBlobFromDrive = (keyword, mime) => {
+    try {
+      const it = folder.getFiles();
+      while (it.hasNext()) {
+        const f = it.next();
+        if (f.getName().toUpperCase().includes(keyword.toUpperCase())) return f.getBlob();
+      }
+    } catch(e) {}
+    return null;
+  };
 
-  // Preparar Blobs
-  const getBlob = (base64, name, mime) => {
+  const getBlobFromBase64 = (base64, name, mime) => {
     if (!base64 || base64.length < 50) return null;
     const raw = base64.includes(",") ? base64.split(",")[1] : base64;
     return Utilities.newBlob(Utilities.base64Decode(raw), mime, name);
   };
 
-  const bFirmaCliente = getBlob(payload.firmaBase64 || payload.firmaCliente, "FIRMA_CLIENTE.png", "image/png");
-  const bFirmaAsesor = getBlob(payload.firmaAsesor || payload.firmaAsesorBase64, "FIRMA_ASESOR.png", "image/png");
-  const bSelfie = getBlob(payload.selfieBase64 || payload.selfie_url, "SELFIE.jpg", "image/jpeg");
+  let bFirmaCliente = getBlobFromBase64(payload.firmaBase64 || payload.firmaCliente, "FIRMA_CLIENTE.png", "image/png") || getBlobFromDrive("FIRMA_CLIENTE", "image/png");
+  const bFirmaAsesor = getBlobFromBase64(payload.firmaAsesor || payload.firmaAsesorBase64, "FIRMA_ASESOR.png", "image/png");
+  let bSelfie = getBlobFromBase64(payload.selfieBase64 || payload.selfie_url, "SELFIE.jpg", "image/jpeg") || getBlobFromDrive("SELFIE", "image/jpeg");
 
   const pdfUrls = { contrato: "", diagnostico: "" };
 
-  // Paso 2 & 4: Contrato Marco -> PDF
+  // Reemplazo Unificado
+  const processDoc = (docId, fileName) => {
+    const doc = DocumentApp.openById(docId);
+    const body = doc.getBody();
+    
+    const cleanRepl = (tag, val) => {
+       if (val !== undefined && val !== null) {
+          body.replaceText(`{{${tag.toUpperCase()}}}`, val);
+          body.replaceText(`{{${tag.toLowerCase()}}}`, val);
+       }
+    };
+
+    cleanRepl("NOMBRE_CLIENTE", payload.nombre);
+    cleanRepl("CURP", rawCurp);
+    cleanRepl("NSS", payload.nss);
+    cleanRepl("FECHA", new Date().toLocaleDateString('es-MX'));
+    cleanRepl("DIAGNOSTICO", payload.dictamen || payload.diagnosticoTexto || "");
+    cleanRepl("SERVICIOS", payload.serviciosContratados || (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : payload.servicios) || "");
+    cleanRepl("MONTO", payload.montoAcordado || payload.monto || "");
+
+    if (bSelfie) {
+      replaceTextWithImageBlob(body, "{{IMAGEN_SELFIE}}", bSelfie, 140, 140);
+      replaceTextWithImageBlob(body, "{{selfie}}", bSelfie, 140, 140);
+    }
+    if (bFirmaCliente) {
+      replaceTextWithImageBlob(body, "{{FIRMA_CLIENTE}}", bFirmaCliente, 200, 100);
+      replaceTextWithImageBlob(body, "{{firma_cliente}}", bFirmaCliente, 200, 100);
+    }
+    if (bFirmaAsesor) {
+      replaceTextWithImageBlob(body, "{{FIRMA_ASESOR}}", bFirmaAsesor, 200, 100);
+      replaceTextWithImageBlob(body, "{{firma_asesor}}", bFirmaAsesor, 200, 100);
+    }
+    
+    doc.saveAndClose();
+    Utilities.sleep(1000);
+    
+    const pdfBlob = doc.getBlob().getAs('application/pdf');
+    const pdfFile = folder.createFile(pdfBlob).setName(fileName + "_" + curp10 + ".pdf");
+    pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    
+    // Trash literal (Google Doc)
+    try { DriveApp.getFileById(docId).setTrashed(true); } catch(e) {}
+    
+    return pdfFile.getUrl();
+  };
+
+  // Paso 2: Contrato Marco
   try {
-    if (CONTRATO_TEMPLATE_ID && !CONTRATO_TEMPLATE_ID.includes("placeholder")) {
+    if (!skipContract && CONTRATO_TEMPLATE_ID && !CONTRATO_TEMPLATE_ID.includes("placeholder")) {
       const copy = DriveApp.getFileById(CONTRATO_TEMPLATE_ID).makeCopy("TEMP_CONTRATO_" + curp10, folder);
-      const doc = DocumentApp.openById(copy.getId());
-      const body = doc.getBody();
-      
-      const cleanRepl = (tag, val) => body.replaceText(tag, val || "");
-      cleanRepl("{{NOMBRE_CLIENTE}}", payload.nombre);
-      cleanRepl("{{nombre_cliente}}", payload.nombre);
-      cleanRepl("{{CURP}}", rawCurp);
-      cleanRepl("{{NSS}}", payload.nss);
-      cleanRepl("{{FECHA}}", new Date().toLocaleDateString('es-MX'));
-      
-      if (bSelfie) replaceTextWithImageBlob(body, "{{IMAGEN_SELFIE}}", bSelfie, 140, 140);
-      if (bFirmaCliente) replaceTextWithImageBlob(body, "{{FIRMA_CLIENTE}}", bFirmaCliente, 200, 100);
-      if (bFirmaAsesor) replaceTextWithImageBlob(body, "{{FIRMA_ASESOR}}", bFirmaAsesor, 200, 100);
-      
-      doc.saveAndClose();
-      
-      const pdfBlob = copy.getAs('application/pdf');
-      const pdfFile = folder.createFile(pdfBlob).setName("CONTRATO_MARCO_" + curp10 + ".pdf");
-      pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      pdfUrls.contrato = pdfFile.getUrl();
-      
-      // Paso 5: Autolimpieza
-      copy.setTrashed(true);
+      pdfUrls.contrato = processDoc(copy.getId(), "CONTRATO_MARCO");
     }
   } catch(e) { logDebug("CONTRATO_GEN_ERR", e.toString()); }
 
-  // Paso 3 & 4: Diagnóstico -> PDF
+  // Paso 3: Diagnóstico
   try {
-    let diagDocFile;
     if (DIAGNOSTICO_TEMPLATE_ID && !DIAGNOSTICO_TEMPLATE_ID.includes("placeholder")) {
-      diagDocFile = DriveApp.getFileById(DIAGNOSTICO_TEMPLATE_ID).makeCopy("TEMP_DIAGNOSTICO_" + curp10, folder);
-      const doc = DocumentApp.openById(diagDocFile.getId());
-      const body = doc.getBody();
-      
-      body.replaceText("{{NOMBRE_CLIENTE}}", payload.nombre || "");
-      body.replaceText("{{CURP}}", rawCurp);
-      body.replaceText("{{DIAGNOSTICO}}", payload.dictamen || payload.diagnosticoTexto || "");
-      body.replaceText("{{SERVICIOS}}", payload.serviciosContratados || (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : payload.servicios) || "");
-      body.replaceText("{{MONTO}}", payload.montoAcordado || payload.monto || "");
-      
-      if (bFirmaAsesor) replaceTextWithImageBlob(body, "{{FIRMA_ASESOR}}", bFirmaAsesor, 180, 90);
-      if (bFirmaCliente) replaceTextWithImageBlob(body, "{{FIRMA_CLIENTE}}", bFirmaCliente, 180, 90);
-      
-      doc.saveAndClose();
+      const copy = DriveApp.getFileById(DIAGNOSTICO_TEMPLATE_ID).makeCopy("TEMP_DIAG_" + curp10, folder);
+      pdfUrls.diagnostico = processDoc(copy.getId(), "DIAGNOSTICO_CERTIFICADO");
     } else {
-      const docUrl = generateDiagnosticDoc(payload, payload.servicios, payload.montoAcordado, payload.asesor, payload.firmaAsesor, payload.id_hoja, payload.montoU2);
+      const docUrl = generateDiagnosticDoc(payload, payload.servicios, payload.montoAcordado, payload.asesor, payload.firmaAsesor || payload.firmaAsesorBase64, payload.id_hoja, payload.montoU2);
       if (docUrl) {
-        const docId = docUrl.split("/d/")[1].split("/")[0];
-        diagDocFile = DriveApp.getFileById(docId);
+         const docId = docUrl.split("/d/")[1].split("/")[0];
+         pdfUrls.diagnostico = processDoc(docId, "DIAGNOSTICO_CERTIFICADO");
       }
     }
-
-    if (diagDocFile) {
-      const pdfBlob = diagDocFile.getAs('application/pdf');
-      const pdfFile = folder.createFile(pdfBlob).setName("DIAGNOSTICO_CERTIFICADO_" + curp10 + ".pdf");
-      pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      pdfUrls.diagnostico = pdfFile.getUrl();
-      
-      // Paso 5: Autolimpieza
-      diagDocFile.setTrashed(true);
-    }
   } catch(e) { logDebug("DIAG_GEN_ERR", e.toString()); }
+
+  // 4. Sincronización Final de URLs y Persistencia
+  try {
+    handleCreateCliente({ ...payload, id: curp10 });
+    handleCreateHoja({ 
+      ...payload, 
+      clienteId: curp10, 
+      diagnostico_url: pdfUrls.diagnostico,
+      contrato_url: pdfUrls.contrato 
+    });
+  } catch(e) { logDebug("SYNC_FINAL_ERR", e.toString()); }
 
   return createResponse({ 
     success: true, 
@@ -622,12 +641,12 @@ function handleGetClienteStatus(payload) {
   }
 }
 
-function getNextEmptyRow(sheet) { 
-  const values = sheet.getRange('A:A').getValues(); 
-  for (var i = 0; i < values.length; i++) { 
-    if (!values[i][0]) return i + 1; 
-  } 
-  return values.length + 1; 
+function getNextEmptyRow(sheet) {
+  const data = sheet.getDataRange().getValues();
+  for (let i = data.length - 1; i >= 0; i--) {
+     if (data[i].some(cell => cell.toString().trim() !== "")) return i + 2;
+  }
+  return 2;
 }
 
 function handleCreateCliente(payload) {
@@ -829,225 +848,58 @@ function handleCreateCliente(payload) {
 
 function handleCreateHoja(payload) {
   const lock = LockService.getScriptLock();
-  try { lock.waitLock(10000); } catch(e) {}
+  try { lock.waitLock(15000); } catch(e) { return createResponse({ status: 'error', message: 'Sistema de persistencia ocupado' }, 429); }
   
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const searchHojaId = (payload.id_hoja || Utilities.getUuid()).toString().toUpperCase().trim();
-    const idBruto = (payload.clienteId || payload.id || "").toString().toUpperCase().replace("NEW_", "").trim();
-    const searchClienteId = idBruto.substring(0, 10).toUpperCase();
+    const rawId = (payload.clienteId || payload.id || "").toString().toUpperCase().replace("NEW_", "").trim();
+    const curp10 = rawId.substring(0, 10).toUpperCase();
 
-    let isMigracion = (payload.origen && (payload.origen.toLowerCase().includes('socio') || payload.origen.toLowerCase().includes('migra'))) || payload.esMigracion || payload.isMigracion;
-    let tienePromotor = (payload.promotor && payload.promotor.trim() !== '') ? true : false;
-    let folderId = payload.id_carpeta_drive;
+    if (!curp10) return createResponse({ status: 'error', message: 'ID Inválido' }, 400);
 
-    try {
-      const clientesSheet = ss.getSheetByName("CLIENTES");
-      if (clientesSheet) {
-        const cData = clientesSheet.getDataRange().getValues();
-        const cHeaders = cData[0].map(h => h.toString().toLowerCase().trim());
-        const cIdCol = cHeaders.indexOf("id");
-        const cCurpCol = cHeaders.indexOf("curp");
-        const cOrigenCol = cHeaders.indexOf("origen");
-        const cPromotorCol = cHeaders.indexOf("promotor");
-        const cFolderCol = cHeaders.indexOf("id_carpeta_drive") !== -1 ? cHeaders.indexOf("id_carpeta_drive") : cHeaders.indexOf("idcarpetadrive");
-        
-        for(let i=1; i<cData.length; i++) {
-          const id = cData[i][cIdCol] ? cData[i][cIdCol].toString().toUpperCase().trim() : "";
-          const curp = cData[i][cCurpCol] ? cData[i][cCurpCol].toString().toUpperCase().trim() : "";
-          if (searchClienteId !== "" && (id === searchClienteId || curp === searchClienteId)) {
-            if (!isMigracion && cOrigenCol !== -1 && cData[i][cOrigenCol] && cData[i][cOrigenCol].toString().toLowerCase().includes('socio')) isMigracion = true;
-            if (!tienePromotor && cPromotorCol !== -1 && cData[i][cPromotorCol] && cData[i][cPromotorCol].toString().trim() !== '') tienePromotor = true;
-            if (!folderId && cFolderCol !== -1) folderId = cData[i][cFolderCol];
+    // Ruteo U1/U2
+    const u2Services = ['Modalidad 40', 'PTI', 'Modalidad 10', 'Continuidad Voluntaria'];
+    const serviciosStr = (payload.dictamen || "") + (payload.serviciosStr || "") + (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || ""));
+    const isU2 = u2Services.some(s => serviciosStr.includes(s)) || payload.universo === 'U2';
+
+    const sheet = ss.getSheetByName(isU2 ? "GESTIONES_U2" : "HOJAS_SERVICIO") || ss.insertSheet(isU2 ? "GESTIONES_U2" : "HOJAS_SERVICIO");
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => h.toString().toLowerCase().trim());
+    
+    // Buscar índice de ID_Cliente
+    const idColIdx = headers.indexOf("id_cliente") !== -1 ? headers.indexOf("id_cliente") : headers.indexOf("clienteid");
+    
+    let targetRow = -1;
+    for (let i = 1; i < data.length; i++) {
+        if (data[i][idColIdx] && data[i][idColIdx].toString().toUpperCase().trim() === curp10) {
+            targetRow = i + 1;
             break;
-          }
-        }
-      }
-    } catch(e) {}
-    
-    let montoTotal = parseNumeric(payload.montoAcordado || payload.honorariosAcordados || payload.monto || 0);
-    
-    // RUTEO INTELIGENTE DE UNIVERSO (Directiva: 'Modalidad 40' o 'PTI' -> U2)
-    const serviciosGlobalStr = (payload.serviciosU1 || "") + (payload.serviciosU2 || "") + (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || ""));
-    const forceU2 = serviciosGlobalStr.includes('Modalidad 40') || serviciosGlobalStr.includes('PTI') || serviciosGlobalStr.includes('Modalidad 10');
-    const hasU2 = forceU2 || payload.universo === 'U2' || (payload.serviciosU2 && payload.montoU2 > 0);
-
-    // Intelligence de Carpetas (Subcarpetas U2)
-    if (hasU2 && folderId) {
-      try {
-        const folder = DriveApp.getFolderById(folderId);
-        if (folder) {
-          const nameLC = `${searchClienteId}_LC`;
-          const nameCI = `${searchClienteId}_CI`;
-          const subFolders = folder.getFolders();
-          let hasLC = false, hasCI = false;
-          while(subFolders.hasNext()) {
-            let f = subFolders.next();
-            if (f.getName() === nameLC) hasLC = true;
-            if (f.getName() === nameCI) hasCI = true;
-          }
-          if (!hasLC) folder.createFolder(nameLC);
-          if (!hasCI) folder.createFolder(nameCI);
-        }
-      } catch(e) { logDebug("ERR_U2_FOLDERS", e.toString()); }
-    }
-
-    const getOrInitSheet = (sheetName, isU2Sheet) => {
-      let sheet = ss.getSheetByName(sheetName);
-      if (!sheet) {
-        sheet = ss.insertSheet(sheetName);
-        if (isU2Sheet) sheet.appendRow(["ID", "ClienteID", "Mes", "Estatus", "Recibido", "IMSS", "Honorarios", "ComprobanteIMSS", "FacturaHonorarios", "UpdatedAt", "Servicios_U2", "URL_Diagnostico", "Subtotal", "IVA_Absorbido", "IVA_Cobrado", "Pago_Promotor", "Utilidad_Bruta"]);
-        else sheet.appendRow(["ID_Hoja", "ID_Cliente", "Universo", "Servicios", "Monto", "Diagnostico", "Status", "Fecha", "Asesor", "FirmaAsesor", "NotasExtra", "URL_Diagnostico", "Subtotal", "IVA_Absorbido", "IVA_Cobrado", "Pago_Promotor", "Utilidad_Bruta"]);
-      }
-      const data = sheet.getDataRange().getValues();
-      const headers = data[0].map(h => h.toString().toLowerCase().trim());
-      const colsToAdd = ["url_diagnostico", "subtotal", "iva_absorbido", "iva_cobrado", "pago_promotor", "utilidad_bruta"];
-      const exactNames = ["URL_Diagnostico", "Subtotal", "IVA_Absorbido", "IVA_Cobrado", "Pago_Promotor", "Utilidad_Bruta"];
-      colsToAdd.forEach((col, idx) => {
-        if (headers.indexOf(col) === -1) { headers.push(col); sheet.getRange(1, headers.length).setValue(exactNames[idx]); }
-      });
-      return { sheet, headers, data };
-    };
-
-    const mapVal = (headers, rowData, colName, val) => {
-      let idx = headers.indexOf(colName.toLowerCase());
-      if (idx !== -1) rowData[idx] = val;
-    };
-
-    // PARTE 1: HOJAS_SERVICIO (UPSERT por ClienteID y Universo)
-    let serviciosU1Str = payload.serviciosU1 || (Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || ""));
-    let montoU1 = parseNumeric(payload.monto1 || payload.montoU1 || payload.monto || 0);
-
-    const sheetU1Obj = getOrInitSheet("HOJAS_SERVICIO", false);
-    
-    // Buscar por los headers reales del Excel del usuario
-    const idClienteColIdx = sheetU1Obj.headers.indexOf("clienteid") !== -1 ? sheetU1Obj.headers.indexOf("clienteid") : sheetU1Obj.headers.indexOf("id_cliente");
-    const universoColIdx = sheetU1Obj.headers.indexOf("universo");
-
-    let rowIndexU1 = -1;
-    for (let i = 1; i < sheetU1Obj.data.length; i++) {
-        let rowCid = (idClienteColIdx !== -1 && sheetU1Obj.data[i][idClienteColIdx]) 
-            ? sheetU1Obj.data[i][idClienteColIdx].toString().toUpperCase().replace("NEW_", "").trim() 
-            : "";
-        
-        // Búsqueda robusta por ClienteID (Ignoramos Universo para evitar duplicados por transición U1/U2)
-        // Buscamos coincidencia con searchClienteId (Nuevo) o con payload.id (Viejo)
-        if (rowCid === searchClienteId || (payload.id && rowCid === payload.id.toString().toUpperCase().replace("NEW_", ""))) {
-            rowIndexU1 = i; break;
         }
     }
-
-    const rowDataU1 = rowIndexU1 > -1 ? [...sheetU1Obj.data[rowIndexU1]] : new Array(sheetU1Obj.headers.length).fill("");
-    while(rowDataU1.length < sheetU1Obj.headers.length) rowDataU1.push("");
-
-    // Función auxiliar para mapear buscando los nombres de columna correctos (Soporta múltiples versiones)
-    const mapValFlex = (names, val) => {
-      for(let n of names) {
-         let idx = sheetU1Obj.headers.indexOf(n);
-         if(idx !== -1) { rowDataU1[idx] = val; return; }
-      }
-    };
-
-    mapValFlex(["id", "id_hoja"], rowIndexU1 > -1 && rowDataU1[sheetU1Obj.headers.indexOf("id") !== -1 ? sheetU1Obj.headers.indexOf("id") : sheetU1Obj.headers.indexOf("id_hoja")] ? rowDataU1[sheetU1Obj.headers.indexOf("id") !== -1 ? sheetU1Obj.headers.indexOf("id") : sheetU1Obj.headers.indexOf("id_hoja")] : searchHojaId);
-    mapValFlex(["clienteid", "id_cliente"], searchClienteId);
-    mapValFlex(["universo"], hasU2 ? "U2" : "U1"); // Actualizar el universo correcto
-    mapValFlex(["servicios"], serviciosU1Str);
-    mapValFlex(["monto"], montoU1);
-    mapValFlex(["diagnostico", "dictamen"], payload.notasDiagnostico || payload.dictamen || "");
-    mapValFlex(["status", "estatus"], "ACTIVO");
-    mapValFlex(["createdat", "fecha"], payload.createdAt || new Date().toISOString());
-    mapValFlex(["asesor"], payload.asesor || "");
-    mapValFlex(["firmaasesor"], payload.firmaAsesor || "");
-    mapValFlex(["notas internas", "notasextra"], payload.notasExtra || "");
     
-    let urlIdx = sheetU1Obj.headers.indexOf("url_diagnostico");
-    mapValFlex(["url_diagnostico"], payload.url_diagnostico || (urlIdx > -1 ? rowDataU1[urlIdx] : ""));
+    if (targetRow === -1) targetRow = getNextEmptyRow(sheet);
 
-    let subU1 = montoU1 / 1.16;
-    mapValFlex(["subtotal"], subU1);
-    mapValFlex(["iva_absorbido"], 0);
-    mapValFlex(["iva_cobrado"], montoU1 - subU1);
-    mapValFlex(["pago_promotor"], 0);
-    mapValFlex(["utilidad_bruta"], subU1);
+    const mapping = {};
+    const map = (name, val) => { const idx = headers.indexOf(name.toLowerCase()); if (idx !== -1) mapping[idx + 1] = val; };
+    
+    map("ID_Hoja", payload.id_hoja || Utilities.getUuid().substring(0,8));
+    map("ID_Cliente", curp10);
+    map("Servicios", Array.isArray(payload.servicios) ? payload.servicios.join(", ") : (payload.servicios || ""));
+    map("Monto", payload.montoAcordado || payload.monto || 0);
+    map("Diagnostico", payload.dictamen || payload.diagnosticoTexto || "");
+    map("Status", "ACTIVO");
+    map("Fecha", new Date().toISOString());
+    map("Asesor", payload.asesor || "");
+    map("FirmaAsesor", payload.firmaAsesor || "");
+    if (payload.diagnostico_url) map("URL_Diagnostico", payload.diagnostico_url);
+    if (payload.contrato_url) map("URL_Contrato", payload.contrato_url);
 
-    if (rowIndexU1 > -1) {
-      sheetU1Obj.sheet.getRange(rowIndexU1 + 1, 1, 1, rowDataU1.length).setValues([rowDataU1]);
-    } else {
-      const nextRow = getNextEmptyRow(sheetU1Obj.sheet);
-      sheetU1Obj.sheet.getRange(nextRow, 1, 1, rowDataU1.length).setValues([rowDataU1]);
-    }
-
-
-    // PARTE 2: GESTIONES_U2 (UPSERT por ClienteID y Mes)
-    if (hasU2) {
-      const sheetU2Obj = getOrInitSheet("GESTIONES_U2", true);
-      const clienteIdColU2 = sheetU2Obj.headers.indexOf("clienteid");
-      const mesColU2 = sheetU2Obj.headers.indexOf("mes");
-      const currentMonth = new Date().toLocaleString('es-MX', {month: 'long', year: 'numeric'});
-
-      let rowIndexU2 = -1;
-      for (let i = 1; i < sheetU2Obj.data.length; i++) {
-        const rowCid = sheetU2Obj.data[i][clienteIdColU2] ? sheetU2Obj.data[i][clienteIdColU2].toString().toUpperCase().trim() : "";
-        const rowMes = sheetU2Obj.data[i][mesColU2] ? sheetU2Obj.data[i][mesColU2].toString().toLowerCase().trim() : "";
-        if (rowCid === searchClienteId && (rowMes === currentMonth.toLowerCase() || rowMes.includes(currentMonth.split(' ')[0].toLowerCase()))) {
-          rowIndexU2 = i; break;
-        }
-      }
-
-      const rowDataU2 = rowIndexU2 > -1 ? [...sheetU2Obj.data[rowIndexU2]] : new Array(sheetU2Obj.headers.length).fill("");
-      while(rowDataU2.length < sheetU2Obj.headers.length) rowDataU2.push("");
-
-      let montoU2 = parseNumeric(payload.montoU2 || payload.monto || 0);
-
-      // MOTOR MATEMÁTICO U2
-      let honorariosFijos = 0; // Reset a 0 por directiva
-      let cuotaIMSS = 0;
-      let subU2 = 0, ivaAbsorbidoU2 = 0, ivaCobradoU2 = 0, pagoPromotorU2 = 0, utilidadBrutaU2 = 0;
-
-      if (isMigracion) {
-          cuotaIMSS = montoU2 - honorariosFijos;
-          if (cuotaIMSS < 0) cuotaIMSS = 0;
-          subU2 = honorariosFijos / 1.16;
-          ivaAbsorbidoU2 = honorariosFijos - subU2;
-          ivaCobradoU2 = 0;
-          pagoPromotorU2 = tienePromotor ? 100 : 0;
-          utilidadBrutaU2 = honorariosFijos - ivaAbsorbidoU2 - pagoPromotorU2;
-      } else {
-          let honorariosConIva = honorariosFijos * 1.16; 
-          cuotaIMSS = montoU2 - honorariosConIva;
-          if (cuotaIMSS < 0) cuotaIMSS = 0;
-          subU2 = honorariosFijos;
-          ivaAbsorbidoU2 = 0;
-          ivaCobradoU2 = honorariosFijos * 0.16;
-          pagoPromotorU2 = 0;
-          utilidadBrutaU2 = honorariosFijos;
-      }
-
-      mapVal(sheetU2Obj.headers, rowDataU2, "id", searchHojaId);
-      mapVal(sheetU2Obj.headers, rowDataU2, "clienteid", searchClienteId);
-      mapVal(sheetU2Obj.headers, rowDataU2, "mes", new Date().toLocaleString('es-MX', {month: 'long', year: 'numeric'}));
-      mapVal(sheetU2Obj.headers, rowDataU2, "estatus", rowDataU2[sheetU2Obj.headers.indexOf("estatus")] || "ACTIVO");
-      mapVal(sheetU2Obj.headers, rowDataU2, "recibido", rowDataU2[sheetU2Obj.headers.indexOf("recibido")] || 0);
-      mapVal(sheetU2Obj.headers, rowDataU2, "imss", cuotaIMSS);
-      // Honorarios U2: En GESTIONES_U2, el campo Honorarios (Columna G) debe ser 0 o vacío por defecto
-      mapVal(sheetU2Obj.headers, rowDataU2, "honorarios", 0);
-      mapVal(sheetU2Obj.headers, rowDataU2, "updatedat", new Date().toISOString());
-      mapVal(sheetU2Obj.headers, rowDataU2, "servicios_u2", payload.serviciosU2 || payload.servicios || "");
-      mapVal(sheetU2Obj.headers, rowDataU2, "url_diagnostico", payload.url_diagnostico || rowDataU2[sheetU2Obj.headers.indexOf("url_diagnostico")] || "");
-      mapVal(sheetU2Obj.headers, rowDataU2, "subtotal", subU2);
-      mapVal(sheetU2Obj.headers, rowDataU2, "iva_absorbido", ivaAbsorbidoU2);
-      mapVal(sheetU2Obj.headers, rowDataU2, "iva_cobrado", ivaCobradoU2);
-      mapVal(sheetU2Obj.headers, rowDataU2, "pago_promotor", pagoPromotorU2);
-      mapVal(sheetU2Obj.headers, rowDataU2, "utilidad_bruta", utilidadBrutaU2);
-
-      if (rowIndexU2 > -1) sheetU2Obj.sheet.getRange(rowIndexU2 + 1, 1, 1, rowDataU2.length).setValues([rowDataU2]);
-      else {
-        const nextRowU2 = getNextEmptyRow(sheetU2Obj.sheet);
-        sheetU2Obj.sheet.getRange(nextRowU2, 1, 1, rowDataU2.length).setValues([rowDataU2]);
-      }
-    }
+    for (let col in mapping) sheet.getRange(targetRow, Number(col)).setValue(mapping[col]);
 
     return createResponse({ success: true });
+  } catch(e) {
+    logDebug("ERR_CREATE_HOJA", e.toString());
+    return createResponse({ status: 'error', message: e.toString() }, 500);
   } finally {
     lock.releaseLock();
   }
